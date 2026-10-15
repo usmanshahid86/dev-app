@@ -10,6 +10,8 @@ The app searches the web (through [Jevlin](docs/SEARCH-INTEGRATION.md)) for _obs
 
 Three things are kept separate throughout: **what the source says**, **what the agent inferred**, and **what you decided**.
 
+**V0.1 (trustworthy discovery)** adds the evidence pipeline described in [docs/EVIDENCE-PIPELINE.md](docs/EVIDENCE-PIPELINE.md): canonical sources with every discovery path preserved, rule-based source categories, cross-batch signal consolidation with raw-signal lineage, transparent corroboration (counts, never a score), selective SSRF-guarded full-page retrieval under explicit budgets, and findings whose support level (`full page, excerpt verified` → `full page` → `snippet only` → `inference`) is computed programmatically from verified excerpts.
+
 ## Quick start (demo mode, no credentials)
 
 ```bash
@@ -64,7 +66,7 @@ If a real provider fails, the run is recorded as `failed`/`partial` with the pro
 
 ```
 src/domain        Zod domain model, workflow state machine, lineage helpers (no I/O)
-src/providers     SearchProvider (jevlin, fixture) · AgentProvider (claude-cli, anthropic-api, fixture) · ops/ (structured agent operations)
+src/providers     SearchProvider (jevlin, fixture) · AgentProvider (claude-cli, anthropic-api, fixture) · PageFetcher (http, fixture) · ops/ (structured agent operations)
 src/db            Drizzle schema, SQLite client, repositories (only module that touches tables)
 src/workflows     discovery · investigation (comparative + deep) · decision · buildPackage · validation · seed · runs
 src/export        Markdown renderers: PROJECT-BRIEF / PRODUCT-DECISION / BUILD-PACKAGE / AGENT-HANDOFF
@@ -73,7 +75,7 @@ src/server        Hono API + config
 src/client        React UI (Vite)
 fixtures/demo     fake corpus + canned reasoning for demo mode
 tests/            vitest suites
-docs/             ARCHITECTURE · DOMAIN-MODEL · DECISIONS · SEARCH-INTEGRATION · AGENT-INTEGRATION · TELEMETRY · V0-STATUS
+docs/             ARCHITECTURE · DOMAIN-MODEL · EVIDENCE-PIPELINE · DECISIONS · SEARCH-INTEGRATION · AGENT-INTEGRATION · TELEMETRY · V0-STATUS · DOGFOOD-01
 ```
 
 See [docs/V0-STATUS.md](docs/V0-STATUS.md) for what works, what is shallow, and what is next.

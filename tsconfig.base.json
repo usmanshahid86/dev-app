@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowImportingTsExtensions": false,
+    "paths": {
+      "@domain/*": ["./src/domain/*"],
+      "@providers/*": ["./src/providers/*"],
+      "@db/*": ["./src/db/*"],
+      "@workflows/*": ["./src/workflows/*"],
+      "@server/*": ["./src/server/*"],
+      "@client/*": ["./src/client/*"],
+      "@telemetry/*": ["./src/telemetry/*"],
+      "@export/*": ["./src/export/*"]
+    }
+  }
+}

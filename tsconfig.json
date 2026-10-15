@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2022"],
+    "noEmit": true
+  },
+  "include": [
+    "src/domain",
+    "src/providers",
+    "src/db",
+    "src/workflows",
+    "src/server",
+    "src/telemetry",
+    "src/export",
+    "src/shared",
+    "scripts",
+    "tests/server",
+    "tests/workflows",
+    "tests/domain",
+    "tests/providers",
+    "fixtures/**/*.ts",
+    "drizzle.config.ts",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
+}

@@ -81,7 +81,8 @@ ${profile.directionSeed ? `- direction_seed: queries that test the developer's s
 Developer profile:
 ${profileText(profile)}
 
-Each query should be specific enough to return concrete pages (forum threads, issues, pricing pages, changelogs), and the purpose should say what signal it is hunting for.`,
+Each query should be specific enough to return concrete pages (forum threads, issues, pricing pages, changelogs, surveys, marketplaces), and the purpose should say what signal it is hunting for.
+Prefer evidence of real pain, structural change, economic opportunity, ecosystem gaps or newly possible capabilities. Do not assume the product must be an AI wrapper. Do not aim queries at a predetermined product idea. Do not force equal counts across families.`,
   }),
 });
 
@@ -92,8 +93,28 @@ export const EvidenceForAgent = z.object({
   title: z.string(),
   snippet: z.string(),
   query: z.string(),
+  category: z.string().default('other'),
+  domain: z.string().default(''),
 });
 export type EvidenceForAgent = z.infer<typeof EvidenceForAgent>;
+
+/** Compact packet for investigation: full-page text excerpt when fetched, snippet otherwise. */
+export const EvidencePacket = EvidenceForAgent.extend({
+  support: z.enum(['full_page', 'snippet_only']),
+  /** Bounded readable text (first N chars of the fetched page) or empty for snippet-only. */
+  pageText: z.string().default(''),
+  pageTruncated: z.boolean().default(false),
+});
+export type EvidencePacket = z.infer<typeof EvidencePacket>;
+
+const packetText = (packets: EvidencePacket[]) =>
+  packets
+    .map((e) =>
+      e.support === 'full_page'
+        ? `### ${e.id} | ${e.title} | ${e.url} | category: ${e.category} | FULL PAGE (${e.pageTruncated ? 'truncated' : 'complete'}) | q: "${e.query}"\n${e.pageText}`
+        : `### ${e.id} | ${e.title} | ${e.url} | category: ${e.category} | SNIPPET ONLY (page not fetched) | q: "${e.query}"\n${e.snippet}`,
+    )
+    .join('\n\n');
 
 export const ExtractedSignal = z.object({
   type: SignalType,
@@ -129,8 +150,8 @@ Rules:
 Developer profile (for relevance only, not for inventing signals):
 ${profileText(profile)}
 
-Evidence (id | title | url | snippet | discovered by query):
-${evidence.map((e) => `- ${e.id} | ${e.title} | ${e.url} | ${e.snippet} | q: "${e.query}"`).join('\n')}`,
+Evidence (id | source category | title | url | snippet | discovered by query):
+${evidence.map((e) => `- ${e.id} | ${e.category} | ${e.title} | ${e.url} | ${e.snippet} | q: "${e.query}"`).join('\n')}`,
   }),
 });
 
@@ -170,6 +191,94 @@ Rules:
 
 Signals:
 ${signals.map((s) => `- ${s.id} [${s.type}] user=${s.affectedUser ?? 'unknown'} | obs: ${s.observation} | inf: ${s.inference}`).join('\n')}`,
+  }),
+});
+
+// ---------------- consolidateSignals ----------------
+export const RawSignalForAgent = SignalForAgent.extend({
+  uncertainty: z.string(),
+  confidence: z.enum(['high', 'medium', 'low']),
+  evidence: z.array(
+    z.object({ id: z.string(), domain: z.string(), category: z.string(), title: z.string() }),
+  ),
+});
+export const ConsolidationOutput = z.object({
+  consolidated: z.array(
+    z.object({
+      type: SignalType,
+      observation: z.string().describe('What the sources collectively say. No inference.'),
+      inference: z.string(),
+      affectedUser: z.string().nullable(),
+      uncertainty: z.string(),
+      confidence: z.enum(['high', 'medium', 'low']),
+      componentSignalIds: z.array(z.string()).min(1),
+      rationale: z
+        .string()
+        .describe('Why these raw signals describe the SAME phenomenon (not merely a related topic).'),
+    }),
+  ),
+});
+export type ConsolidationOutput = z.infer<typeof ConsolidationOutput>;
+
+export const consolidateSignals = defineOperation<
+  { signals: z.infer<typeof RawSignalForAgent>[] },
+  ConsolidationOutput
+>({
+  name: 'consolidateSignals',
+  description:
+    'Merge raw signals from different evidence batches that describe the same underlying phenomenon.',
+  output: ConsolidationOutput,
+  effort: 'medium',
+  buildPrompt: ({ signals }) => ({
+    system: SYSTEM_BASE,
+    user: `The raw signals below were extracted from separate evidence batches, so related observations may never have been seen together. CONSOLIDATE them.
+
+Rules:
+- Merge raw signals ONLY when they describe the SAME underlying phenomenon (the same thing is happening to the same kind of user), even if the wording and sources differ. Example: "developers re-paste context into each agent", "teams hand-sync three memory files" and "users request session export to another agent" are the same phenomenon: context does not survive switching coding agents.
+- Do NOT merge signals that merely share a topic or keywords (e.g. an adoption survey and a complaint about the same tool are different phenomena).
+- A raw signal may appear in at most one consolidated signal. Signals that stand alone must still be returned as their own consolidated signal (one component).
+- Every consolidated signal lists its componentSignalIds (from the input) and a rationale. Never invent ids.
+- observation = what the sources collectively say; inference = what you conclude; keep them separate. State uncertainty honestly (single anecdote vs. several independent sources).
+
+Raw signals:
+${signals
+  .map(
+    (s) =>
+      `- ${s.id} [${s.type}] user=${s.affectedUser ?? 'unknown'} conf=${s.confidence} | obs: ${s.observation} | inf: ${s.inference} | unc: ${s.uncertainty} | evidence: ${s.evidence.map((e) => `${e.id}(${e.category}@${e.domain})`).join(', ')}`,
+  )
+  .join('\n')}`,
+  }),
+});
+
+// ---------------- selectSourcesForFetch ----------------
+export const FetchSelectionOutput = z.object({
+  selections: z.array(z.object({ evidenceId: z.string(), reason: z.string() })),
+});
+export type FetchSelectionOutput = z.infer<typeof FetchSelectionOutput>;
+
+export const selectSourcesForFetch = defineOperation<
+  {
+    opportunity: OpportunityForAgent;
+    evidence: EvidenceForAgent[];
+    maxFetches: number;
+    purpose: 'comparative' | 'deep' | 'validation';
+  },
+  FetchSelectionOutput
+>({
+  name: 'selectSourcesForFetch',
+  description: 'Choose which sources are worth reading in full under a fetch budget.',
+  output: FetchSelectionOutput,
+  effort: 'low',
+  buildPrompt: ({ opportunity, evidence, maxFetches, purpose }) => ({
+    system: SYSTEM_BASE,
+    user: `Choose at most ${maxFetches} evidence records whose FULL PAGE is worth reading for a ${purpose} investigation of the opportunity below. Only snippets are available so far.
+Prefer: primary sources (pricing pages, official docs, changelogs, issue trackers), pages whose snippet makes a concrete claim the investigation depends on, and sources that would corroborate or contradict the thesis. Avoid listicles, ads and pages that merely repeat another selected source. Return fewer than ${maxFetches} if fewer are worth it. Only use evidence ids from the input.
+
+Opportunity: ${opportunity.title} — ${opportunity.thesis}
+Open questions: ${opportunity.openQuestions.join('; ')}
+
+Evidence:
+${evidence.map((e) => `- ${e.id} | ${e.category} | ${e.title} | ${e.url} | ${e.snippet}`).join('\n')}`,
   }),
 });
 
@@ -298,7 +407,15 @@ export const AgentFinding = z.object({
   kind: FindingKind,
   supportStrength: SupportStrength,
   evidenceIds: z.array(z.string()),
+  /** Verbatim passages from the cited evidence that support the claim (validated programmatically). */
+  excerpts: z.array(z.object({ evidenceId: z.string(), excerpt: z.string() })).optional(),
 });
+
+const FINDING_RULES = `Finding rules:
+- kind=sourced_fact ONLY for claims a cited source actually states; cite the evidence ids. Add 1–2 short VERBATIM excerpts (copied exactly from the FULL PAGE text when available, otherwise from the snippet) that support the claim. Excerpts will be checked against the stored text; a paraphrase will be rejected.
+- kind=inference for conclusions you draw; evidenceIds may list what informed it but it stays an inference.
+- Prefer claims backed by FULL PAGE evidence over snippet-only evidence, and say so in supportStrength.
+- Never cite an evidence id that is not in the input.`;
 export const ComparisonOutput = z.object({
   findings: z.array(AgentFinding),
   rows: z.array(
@@ -321,7 +438,7 @@ export const ComparisonOutput = z.object({
 export type ComparisonOutput = z.infer<typeof ComparisonOutput>;
 
 export const compareOpportunities = defineOperation<
-  { candidates: Array<{ opportunity: OpportunityForAgent; evidence: EvidenceForAgent[] }> },
+  { candidates: Array<{ opportunity: OpportunityForAgent; evidence: EvidencePacket[] }> },
   ComparisonOutput
 >({
   name: 'compareOpportunities',
@@ -330,12 +447,13 @@ export const compareOpportunities = defineOperation<
   effort: 'high',
   buildPrompt: ({ candidates }) => ({
     system: SYSTEM_BASE,
-    user: `Compare these opportunities side by side using ONLY the evidence provided. First list findings (sourced_fact with evidence ids, or inference with empty evidenceIds). Then fill one row per opportunity referencing finding keys. Finish with a short neutral summary (do not pick a winner; state trade-offs).
+    user: `Compare these opportunities side by side using ONLY the evidence provided. First list findings. Then fill one row per opportunity referencing finding keys. Finish with a short neutral summary (do not pick a winner; state trade-offs).
+${FINDING_RULES}
 
 ${candidates
   .map(
     (c) =>
-      `## Opportunity ${c.opportunity.id}: ${c.opportunity.title}\n${JSON.stringify(c.opportunity, null, 2)}\nEvidence:\n${c.evidence.map((e) => `- ${e.id} | ${e.title} | ${e.url} | ${e.snippet}`).join('\n')}`,
+      `## Opportunity ${c.opportunity.id}: ${c.opportunity.title}\n${JSON.stringify(c.opportunity, null, 2)}\nEvidence:\n${packetText(c.evidence)}`,
   )
   .join('\n\n')}`,
   }),
@@ -370,7 +488,7 @@ export const BriefOutput = z.object({
 export type BriefOutput = z.infer<typeof BriefOutput>;
 
 export const synthesizeBrief = defineOperation<
-  { profile: DiscoveryProfile; opportunity: OpportunityForAgent; evidence: EvidenceForAgent[] },
+  { profile: DiscoveryProfile; opportunity: OpportunityForAgent; evidence: EvidencePacket[] },
   BriefOutput
 >({
   name: 'synthesizeBrief',
@@ -382,6 +500,7 @@ export const synthesizeBrief = defineOperation<
     user: `Write a sourced PRODUCT BRIEF for the opportunity below.
 
 Step 1 — findings: list every factual claim you will rely on as a finding with kind=sourced_fact and the evidence ids that support it, plus the inferences you make as kind=inference (evidenceIds may be empty for inferences). Give each a short key (F1, F2, ...). Set supportStrength honestly.
+${FINDING_RULES}
 Step 2 — sections: write these sections (use exactly these keys): ${BRIEF_SECTIONS.map((s) => s.key).join(', ')}.
 Each section body is Markdown and must cite findings inline as [F:key]. Do not state facts that are not findings. The "sources" section is rendered automatically from evidence — do not write it.
 
@@ -391,8 +510,8 @@ ${profileText(profile)}
 Opportunity:
 ${JSON.stringify(opportunity, null, 2)}
 
-Evidence:
-${evidence.map((e) => `- ${e.id} | ${e.title} | ${e.url} | ${e.snippet} | q: "${e.query}"`).join('\n')}`,
+Evidence (full-page text where the page was fetched; snippet otherwise):
+${packetText(evidence)}`,
   }),
 });
 
@@ -569,7 +688,7 @@ export const reviewValidation = defineOperation<
     opportunity: OpportunityForAgent;
     assumptions: Assumption[];
     originalEvidence: EvidenceForAgent[];
-    newEvidence: EvidenceForAgent[];
+    newEvidence: EvidencePacket[];
     whatWeBuilt: string;
     implementationLessons: string;
   },
@@ -593,7 +712,9 @@ ${i.assumptions.map((a) => `- ${a.id}: ${a.statement}`).join('\n')}
 Original evidence (for reference):
 ${i.originalEvidence.map((e) => `- ${e.id} | ${e.title} | ${e.url}`).join('\n')}
 
+${FINDING_RULES}
+
 NEW evidence:
-${i.newEvidence.map((e) => `- ${e.id} | ${e.title} | ${e.url} | ${e.snippet}`).join('\n')}`,
+${packetText(i.newEvidence)}`,
   }),
 });

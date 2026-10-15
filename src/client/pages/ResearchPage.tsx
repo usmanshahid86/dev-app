@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { useProjectCtx, useSnapshot } from '../lib/useProject';
 import { RunStatus } from '../components/RunStatus';
 import { Markdown } from '../components/Markdown';
-import { DimBadge, DemoTag } from '../components/Badges';
+import { DimBadge, DemoTag, SupportBadge, FetchBadge, CategoryBadge } from '../components/Badges';
 import { FindingChip, EvidenceChip, useInspector } from '../components/Inspector';
 import type { Investigation, ProductBrief } from '@domain/types';
 
@@ -243,13 +243,18 @@ function BriefView({ brief }: { brief: ProductBrief }) {
         <h2>
           {brief.sections.length + 1}. Sources ({cited.length})
         </h2>
+        <div className="small muted" style={{ marginBottom: 6 }}>
+          {findings.filter((f) => f.supportLevel.startsWith('full_page')).length} of {findings.length}{' '}
+          findings rest on a fetched source page; the rest rest on search snippets or are inferences.
+        </div>
         <ul>
           {cited.map((id) => {
             const e = snap.evidence.find((x) => x.id === id);
             return e ? (
               <li key={id}>
-                <EvidenceChip id={id} from="brief-sources" /> {e.title}{' '}
-                <span className="url muted">{e.url}</span>
+                <EvidenceChip id={id} from="brief-sources" /> <CategoryBadge category={e.category} />{' '}
+                <FetchBadge status={e.fetchStatus} /> {e.pageTitle || e.title}{' '}
+                <span className="url muted">{e.canonicalUrl || e.url}</span>
               </li>
             ) : null;
           })}
@@ -282,9 +287,7 @@ function BriefView({ brief }: { brief: ProductBrief }) {
           >
             <div className="row">
               <FindingChip id={f.id} inference={f.kind === 'inference'} />
-              <span className={`badge ${f.kind === 'inference' ? 'badge-demo' : 'badge-ok'}`}>
-                {f.kind === 'inference' ? 'inference' : 'sourced'}
-              </span>
+              <SupportBadge level={f.supportLevel} />
               <span className="badge badge-neutral">{f.supportStrength}</span>
               <span className="muted small">{f.section}</span>
             </div>

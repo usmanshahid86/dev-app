@@ -6,10 +6,14 @@ import { FixtureSearchProvider } from './search/fixture';
 import { ClaudeCliAgentProvider } from './agent/claudeCli';
 import { AnthropicApiAgentProvider } from './agent/anthropicApi';
 import { FixtureAgentProvider } from './agent/fixture';
+import type { PageFetcher } from './fetch/PageFetcher';
+import { HttpPageFetcher } from './fetch/http';
+import { FixturePageFetcher } from './fetch/fixture';
 
 export interface Providers {
   search: SearchProvider;
   agent: AgentProvider;
+  pageFetcher: PageFetcher;
   /** 'demo' if either provider is a fixture. Surfaced prominently in the UI. */
   mode: 'demo' | 'real';
 }
@@ -29,5 +33,7 @@ export function buildProviders(cfg: AppConfig): Providers {
       : cfg.agentProvider === 'anthropic-api'
         ? new AnthropicApiAgentProvider({ model: cfg.anthropic.model })
         : new FixtureAgentProvider();
-  return { search, agent, mode: search.isDemo || agent.isDemo ? 'demo' : 'real' };
+  const pageFetcher: PageFetcher =
+    cfg.pageFetcher === 'fixture' ? new FixturePageFetcher() : new HttpPageFetcher();
+  return { search, agent, pageFetcher, mode: search.isDemo || agent.isDemo ? 'demo' : 'real' };
 }

@@ -19,6 +19,7 @@
     "tests/workflows",
     "tests/domain",
     "tests/providers",
+    "tests/db",
     "fixtures/**/*.ts",
     "drizzle.config.ts",
     "vite.config.ts",

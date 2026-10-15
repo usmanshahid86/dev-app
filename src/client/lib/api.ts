@@ -3,6 +3,7 @@ import type {
   ResearchRun,
   ResearchQuery,
   Evidence,
+  EvidenceDiscovery,
   Signal,
   SignalCluster,
   Opportunity,
@@ -17,11 +18,25 @@ import type {
   OpportunityStatus,
 } from '@domain/types';
 
+export interface EvidenceUsage {
+  returned: number;
+  promoted: true;
+  fetchSelected: boolean;
+  fetched: boolean;
+  usedInRawSignal: boolean;
+  usedInConsolidatedSignal: boolean;
+  usedInOpportunity: boolean;
+  usedInFinding: boolean;
+  inspectedByHuman: boolean;
+}
+
 export interface Snapshot {
   project: Project;
   runs: ResearchRun[];
   queries: ResearchQuery[];
   evidence: Evidence[];
+  discoveries: EvidenceDiscovery[];
+  evidenceUsage: Record<string, EvidenceUsage>;
   signals: Signal[];
   clusters: SignalCluster[];
   opportunities: Opportunity[];
@@ -126,4 +141,13 @@ export const api = {
       `/api/projects/${id}/raw/${rawId}`,
     ).then((r) => r.raw),
   seedDemo: () => post<{ projectId: string }>('/api/demo/seed'),
+  evidenceText: (id: string, evidenceId: string) =>
+    req<{
+      evidenceId: string;
+      fetchStatus: string;
+      textTruncated: boolean;
+      textChars: number | null;
+      pageTitle: string | null;
+      text: string | null;
+    }>(`/api/projects/${id}/evidence/${evidenceId}/text`),
 };

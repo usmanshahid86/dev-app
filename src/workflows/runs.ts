@@ -6,6 +6,35 @@
 import type { WorkflowContext } from './context';
 import type { ResearchRun, RunKind, RunStageLabel, ResearchBudget } from '@domain/types';
 import { newId, nowIso } from '@domain/ids';
+import { AgentProviderError, type AgentOperation } from '@providers/agent/AgentProvider';
+
+/**
+ * Run an agent operation with ONE retry on a retryable failure (e.g. malformed structured output).
+ * Retries are counted on the run and emitted as telemetry; the second failure propagates.
+ */
+export async function runAgent<I, O>(
+  ctx: WorkflowContext,
+  run: ResearchRun,
+  op: AgentOperation<I, O>,
+  input: I,
+): Promise<O> {
+  try {
+    return (await ctx.providers.agent.run(op, input)).output;
+  } catch (err) {
+    if (err instanceof AgentProviderError && err.retryable) {
+      const cur = ctx.repos.getRun(run.id);
+      if (cur) bumpProgress(ctx, run.id, { agentRetries: cur.progress.agentRetries + 1 });
+      ctx.telemetry.emit('agent_retry', run.projectId, {
+        runId: run.id,
+        op: op.name,
+        code: err.code,
+        provider: err.provider,
+      });
+      return (await ctx.providers.agent.run(op, input)).output;
+    }
+    throw err;
+  }
+}
 
 export function createRun(
   ctx: WorkflowContext,
@@ -24,7 +53,18 @@ export function createRun(
     budget,
     searchProvider: ctx.providers.search.name,
     agentProvider: ctx.providers.agent.name,
-    progress: { queriesPlanned: 0, queriesCompleted: 0, queriesFailed: 0, evidenceCount: 0, signalCount: 0 },
+    progress: {
+      queriesPlanned: 0,
+      queriesCompleted: 0,
+      queriesFailed: 0,
+      evidenceCount: 0,
+      signalCount: 0,
+      consolidatedSignalCount: 0,
+      pageFetchesSelected: 0,
+      pageFetchesCompleted: 0,
+      pageFetchesFailed: 0,
+      agentRetries: 0,
+    },
     error: null,
     createdAt: nowIso(),
     updatedAt: nowIso(),

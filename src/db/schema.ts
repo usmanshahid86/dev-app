@@ -80,8 +80,50 @@ export const evidence = sqliteTable(
     retrievedAt: text('retrieved_at').notNull(),
     fullText: text('full_text'),
     isDemo: integer('is_demo', { mode: 'boolean' }).notNull().default(false),
+    // V0.1: canonical source identity, classification and fetch state
+    canonicalUrl: text('canonical_url').notNull().default(''),
+    domain: text('domain').notNull().default(''),
+    category: text('category').notNull().default('other'),
+    categoryConfidence: text('category_confidence').notNull().default('low'),
+    fetchStatus: text('fetch_status').notNull().default('snippet_only'),
+    finalUrl: text('final_url'),
+    httpStatus: integer('http_status'),
+    contentType: text('content_type'),
+    pageTitle: text('page_title'),
+    textTruncated: integer('text_truncated', { mode: 'boolean' }).notNull().default(false),
+    textChars: integer('text_chars'),
+    textHash: text('text_hash'),
+    fetchedAt: text('fetched_at'),
+    fetchError: text('fetch_error'),
+    fetchRunId: text('fetch_run_id'),
   },
-  (t) => [index('evidence_project_idx').on(t.projectId), index('evidence_query_idx').on(t.queryId)],
+  (t) => [
+    index('evidence_project_idx').on(t.projectId),
+    index('evidence_query_idx').on(t.queryId),
+    index('evidence_canonical_idx').on(t.projectId, t.canonicalUrl),
+  ],
+);
+
+/** Every time a search returned a source: one row per (query, source). Rediscoveries are preserved. */
+export const evidenceDiscoveries = sqliteTable(
+  'evidence_discoveries',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    evidenceId: text('evidence_id').notNull(),
+    queryId: text('query_id').notNull(),
+    runId: text('run_id').notNull(),
+    position: integer('position'),
+    provider: text('provider').notNull(),
+    providerMeta: text('provider_meta', { mode: 'json' }),
+    url: text('url').notNull(),
+    retrievedAt: text('retrieved_at').notNull(),
+  },
+  (t) => [
+    index('discoveries_evidence_idx').on(t.evidenceId),
+    index('discoveries_query_idx').on(t.queryId),
+    index('discoveries_project_idx').on(t.projectId),
+  ],
 );
 
 export const signals = sqliteTable(
@@ -90,6 +132,9 @@ export const signals = sqliteTable(
     id: text('id').primaryKey(),
     projectId: text('project_id').notNull(),
     runId: text('run_id').notNull(),
+    kind: text('kind').notNull().default('raw'),
+    componentSignalIds: text('component_signal_ids', { mode: 'json' }).notNull().default('[]'),
+    stats: text('stats', { mode: 'json' }),
     type: text('type').notNull(),
     observation: text('observation').notNull(),
     inference: text('inference').notNull(),
@@ -136,6 +181,7 @@ export const opportunities = sqliteTable(
     majorUncertainties: text('major_uncertainties', { mode: 'json' }).notNull(),
     openQuestions: text('open_questions', { mode: 'json' }).notNull(),
     dimensions: text('dimensions', { mode: 'json' }).notNull(),
+    corroboration: text('corroboration', { mode: 'json' }),
     status: text('status').notNull(),
     seeded: integer('seeded', { mode: 'boolean' }).notNull().default(false),
     createdAt: text('created_at').notNull(),
@@ -166,6 +212,8 @@ export const findings = sqliteTable(
     kind: text('kind').notNull(),
     supportStrength: text('support_strength').notNull(),
     evidenceIds: text('evidence_ids', { mode: 'json' }).notNull(),
+    supportLevel: text('support_level').notNull().default('snippet_only'),
+    excerpts: text('excerpts', { mode: 'json' }).notNull().default('[]'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [index('findings_inv_idx').on(t.investigationId)],

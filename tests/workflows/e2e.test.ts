@@ -125,10 +125,14 @@ describe('end-to-end: no idea → opportunities → brief → decision → build
     expect(v.verdict).toBe('CONTINUE');
     expect(v.newEvidenceIds.length).toBeGreaterThan(0);
     expect(v.assumptionStatus.length).toBe(v.originalAssumptions.length);
-    // Original artifacts untouched; new evidence appended.
+    // Original artifacts untouched; new discoveries appended (same canonical sources → no duplicate evidence rows).
     expect(after.briefs).toEqual(before.briefs);
     expect(after.decisions).toEqual(before.decisions);
-    expect(after.evidence.length).toBeGreaterThan(before.evidence.length);
+    expect(after.discoveries.length).toBeGreaterThan(before.discoveries.length);
+    expect(after.evidence.length).toBeGreaterThanOrEqual(before.evidence.length);
+    expect(new Set(after.discoveries.filter((d) => d.runId === v.runId).map((d) => d.evidenceId)).size).toBe(
+      v.newEvidenceIds.length,
+    );
     expect(after.project.stage).toBe('BUILD_PACKAGE_READY');
   });
 
@@ -141,7 +145,7 @@ describe('end-to-end: no idea → opportunities → brief → decision → build
   });
 
   it('emits the R&D telemetry chain', () => {
-    const types = new Set(ctx.repos.listEvents(ids.projectId).map((e) => e.type));
+    const types = new Set(ctx.repos.listEvents(ids.projectId, 10000).map((e) => e.type));
     for (const t of [
       'discovery_started',
       'query_planned',

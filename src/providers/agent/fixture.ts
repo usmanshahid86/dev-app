@@ -16,7 +16,10 @@ import {
 import type { DiscoveryProfile, Assumption } from '@domain/types';
 import type {
   EvidenceForAgent,
+  EvidencePacket,
   OpportunityForAgent,
+  ConsolidationOutput,
+  FetchSelectionOutput,
   DiscoveryPlanOutput,
   SignalExtractionOutput,
   ClusterOutput,
@@ -87,6 +90,23 @@ function resolveUrls(urls: string[], evidence: EvidenceForAgent[]): string[] {
   return ids;
 }
 
+/** Verbatim excerpt from the page text when fetched (first sentence), else from the snippet. */
+function excerptsFor(
+  evidenceIds: string[],
+  evidence: Array<EvidenceForAgent & Partial<EvidencePacket>>,
+): Array<{ evidenceId: string; excerpt: string }> {
+  const out: Array<{ evidenceId: string; excerpt: string }> = [];
+  for (const id of evidenceIds.slice(0, 2)) {
+    const e = evidence.find((x) => x.id === id);
+    if (!e) continue;
+    const src = e.support === 'full_page' && e.pageText ? e.pageText : e.snippet;
+    const sentence = src.split(/(?<=[.!?])\s+/)[0] ?? src;
+    const excerpt = sentence.slice(0, 220);
+    if (excerpt.length >= 12) out.push({ evidenceId: id, excerpt });
+  }
+  return out;
+}
+
 // ---------- handlers ----------
 
 const HANDLERS = {
@@ -149,6 +169,88 @@ const HANDLERS = {
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
     return { signals };
+  },
+
+  consolidateSignals(i: {
+    signals: Array<{
+      id: string;
+      observation: string;
+      type: any;
+      inference: string;
+      affectedUser: string | null;
+      uncertainty: string;
+      confidence: any;
+    }>;
+  }): ConsolidationOutput {
+    const byPhenomenon = new Map<string, typeof i.signals>();
+    const standalone: typeof i.signals = [];
+    for (const s of i.signals) {
+      const demo = DEMO_SIGNALS.find((d) => s.observation.includes(d.observation));
+      if (!demo) {
+        standalone.push(s);
+        continue;
+      }
+      const list = byPhenomenon.get(demo.phenomenon) ?? [];
+      list.push(s);
+      byPhenomenon.set(demo.phenomenon, list);
+    }
+    const consolidated: ConsolidationOutput['consolidated'] = [];
+    for (const [phenomenon, members] of byPhenomenon) {
+      const first = members[0]!;
+      const merged = members.length > 1;
+      consolidated.push({
+        type: first.type,
+        observation: merged
+          ? DEMO_TAG +
+            `Across ${members.length} independent observations: ${members.map((m) => m.observation.replace(DEMO_TAG, '').replace(/\.$/, '')).join('; ')}.`
+          : first.observation,
+        inference: merged
+          ? `Same underlying phenomenon (${phenomenon}) reported from different angles.`
+          : first.inference,
+        affectedUser: first.affectedUser,
+        uncertainty: merged ? 'Multiple sources, but all from the demo corpus.' : first.uncertainty,
+        confidence: merged ? 'high' : first.confidence,
+        componentSignalIds: members.map((m) => m.id),
+        rationale: merged
+          ? `These raw signals all describe ${phenomenon}: the same thing happening to the same kind of user.`
+          : 'Stands alone; no other raw signal describes the same phenomenon.',
+      });
+    }
+    for (const s of standalone) {
+      consolidated.push({
+        type: s.type,
+        observation: s.observation,
+        inference: s.inference,
+        affectedUser: s.affectedUser,
+        uncertainty: s.uncertainty,
+        confidence: s.confidence,
+        componentSignalIds: [s.id],
+        rationale: 'Stands alone.',
+      });
+    }
+    return { consolidated };
+  },
+
+  selectSourcesForFetch(i: {
+    opportunity: OpportunityForAgent;
+    evidence: EvidenceForAgent[];
+    maxFetches: number;
+  }): FetchSelectionOutput {
+    const theme = themeOfOpportunity(i.opportunity);
+    const ranked = i.evidence
+      .map((e) => ({ e, page: findDemoPageByUrl(e.url) }))
+      .filter((x) => x.page && x.page.signalKey)
+      .sort(
+        (a, b) =>
+          Number(b.page!.theme === theme) - Number(a.page!.theme === theme) || a.e.id.localeCompare(b.e.id),
+      );
+    return {
+      selections: ranked.slice(0, i.maxFetches).map((x) => ({
+        evidenceId: x.e.id,
+        reason:
+          DEMO_TAG + (x.page!.theme === theme ? 'Primary source for this opportunity.' : 'Related source.'),
+      })),
+    };
   },
 
   clusterSignals(i: { signals: Array<{ id: string; observation: string }> }): ClusterOutput {
@@ -238,13 +340,15 @@ const HANDLERS = {
       for (const f of inv?.findings ?? []) {
         const key = `C${idx + 1}-${f.key}`;
         keys.push(key);
+        const evidenceIds = resolveUrls(f.urls, c.evidence);
         findings.push({
           key,
           section: f.section,
           claim: DEMO_TAG + f.claim,
           kind: f.kind,
           supportStrength: f.supportStrength,
-          evidenceIds: resolveUrls(f.urls, c.evidence),
+          evidenceIds,
+          excerpts: excerptsFor(evidenceIds, c.evidence),
         });
       }
       const row = inv?.comparisonRow;
@@ -271,18 +375,22 @@ const HANDLERS = {
     };
   },
 
-  synthesizeBrief(i: { opportunity: OpportunityForAgent; evidence: EvidenceForAgent[] }): BriefOutput {
+  synthesizeBrief(i: { opportunity: OpportunityForAgent; evidence: EvidencePacket[] }): BriefOutput {
     const inv = findInvestigation(themeOfOpportunity(i.opportunity));
     if (!inv) return genericBrief(i.opportunity, i.evidence);
     return {
-      findings: inv.findings.map((f) => ({
-        key: f.key,
-        section: f.section,
-        claim: DEMO_TAG + f.claim,
-        kind: f.kind,
-        supportStrength: f.supportStrength,
-        evidenceIds: resolveUrls(f.urls, i.evidence),
-      })),
+      findings: inv.findings.map((f) => {
+        const evidenceIds = resolveUrls(f.urls, i.evidence);
+        return {
+          key: f.key,
+          section: f.section,
+          claim: DEMO_TAG + f.claim,
+          kind: f.kind,
+          supportStrength: f.supportStrength,
+          evidenceIds,
+          excerpts: excerptsFor(evidenceIds, i.evidence),
+        };
+      }),
       sections: BRIEF_SECTIONS.map((s) => {
         const sec = inv.sections[s.key];
         return { key: s.key, body: sec?.body ?? '(no content in demo)', findingKeys: sec?.findingKeys ?? [] };
@@ -390,6 +498,7 @@ const HANDLERS = {
       kind: 'sourced_fact' as const,
       supportStrength: 'medium' as const,
       evidenceIds: [e.id],
+      excerpts: excerptsFor([e.id], i.newEvidence),
     }));
     return {
       findings,
@@ -425,7 +534,7 @@ function mapFindingKeys(
   return m;
 }
 
-function genericBrief(opp: OpportunityForAgent, evidence: EvidenceForAgent[]): BriefOutput {
+function genericBrief(opp: OpportunityForAgent, evidence: EvidencePacket[]): BriefOutput {
   const findings = evidence.slice(0, 4).map((e, idx) => ({
     key: `F${idx + 1}`,
     section: 'observations',
@@ -433,6 +542,7 @@ function genericBrief(opp: OpportunityForAgent, evidence: EvidenceForAgent[]): B
     kind: 'sourced_fact' as const,
     supportStrength: 'weak' as const,
     evidenceIds: [e.id],
+    excerpts: excerptsFor([e.id], evidence),
   }));
   if (!findings.length) {
     findings.push({
@@ -442,6 +552,7 @@ function genericBrief(opp: OpportunityForAgent, evidence: EvidenceForAgent[]): B
       kind: 'sourced_fact',
       supportStrength: 'weak',
       evidenceIds: [],
+      excerpts: [],
     });
   }
   const keys = findings.map((f) => f.key);

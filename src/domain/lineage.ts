@@ -45,6 +45,15 @@ export function findingsForRequirement(req: Requirement, decision: Decision, fin
   return findings.filter((f) => direct.has(f.id) || viaAssumption.has(f.id));
 }
 
+export function rawSignalsForConsolidated(consolidated: Signal, signals: Signal[]): Signal[] {
+  const set = new Set(consolidated.componentSignalIds);
+  return signals.filter((s) => set.has(s.id));
+}
+
+export function consolidatedForRaw(rawId: string, signals: Signal[]): Signal | undefined {
+  return signals.find((s) => s.kind === 'consolidated' && s.componentSignalIds.includes(rawId));
+}
+
 /** Validate that every referenced id exists. Returns a list of dangling references. */
 export function danglingReferences(input: {
   evidence: Evidence[];
@@ -57,6 +66,8 @@ export function danglingReferences(input: {
   for (const s of input.signals) {
     for (const id of s.evidenceIds)
       if (!evIds.has(id)) problems.push(`signal ${s.id} → missing evidence ${id}`);
+    for (const id of s.componentSignalIds)
+      if (!sigIds.has(id)) problems.push(`consolidated signal ${s.id} → missing raw signal ${id}`);
   }
   for (const o of input.opportunities) {
     for (const id of o.signalIds)

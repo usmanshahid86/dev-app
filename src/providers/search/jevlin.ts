@@ -22,6 +22,8 @@ export interface JevlinConfig {
   configPath: string;
   tier?: string;
   defaultTimeoutMs?: number;
+  /** Hard cap on max_results sent to the router. 20 observed as the largest honoured value on the fast tier. */
+  maxResultsLimit?: number;
 }
 
 interface JevlinEnvelope {
@@ -63,7 +65,8 @@ export class JevlinSearchProvider implements SearchProvider {
 
   async search(query: string, options: SearchOptions = {}): Promise<SearchResultSet> {
     const request: Record<string, unknown> = { version: 1, query, view: 'merged' };
-    if (options.maxResults) request.max_results = Math.min(25, Math.max(1, options.maxResults));
+    const limit = this.cfg.maxResultsLimit ?? 20;
+    if (options.maxResults) request.max_results = Math.min(limit, Math.max(1, options.maxResults));
     if (options.recency) request.recency = options.recency;
     if (options.domainFilter?.length) request.domain_filter = options.domainFilter.slice(0, 16);
     if (this.cfg.tier) request.tier = this.cfg.tier;
@@ -99,10 +102,23 @@ export class JevlinSearchProvider implements SearchProvider {
         stdout,
       );
     }
+    const items = normalizeJevlin(env);
+    // A router answer with no chosen provider and no results means no provider actually ran
+    // (observed with max_results above the fast-tier limit). Surface it instead of recording an empty success.
+    if (items.length === 0 && typeof env.result?.chosen === 'number' && env.result.chosen < 0) {
+      throw new SearchProviderError(
+        'Jevlin returned ok but no provider answered (chosen=-1, empty merged list)',
+        this.name,
+        'no_provider_answer',
+        true,
+        'retry',
+        stdout,
+      );
+    }
     return {
       provider: this.name,
       query,
-      items: normalizeJevlin(env),
+      items,
       rawText: stdout,
       durationMs,
       isDemo: false,

@@ -58,12 +58,17 @@ export function createApp(ctx: WorkflowContext) {
       providers: {
         search: { name: ctx.providers.search.name, isDemo: ctx.providers.search.isDemo, ...search },
         agent: { name: ctx.providers.agent.name, isDemo: ctx.providers.agent.isDemo, ...agent },
+        pageFetcher: { name: ctx.providers.pageFetcher.name, isDemo: ctx.providers.pageFetcher.isDemo },
       },
       budgets: {
         discoveryMaxQueries: ctx.config.discoveryMaxQueries,
         discoveryMaxResultsPerQuery: ctx.config.discoveryMaxResultsPerQuery,
         investigationMaxQueries: ctx.config.investigationMaxQueries,
         validationMaxQueries: ctx.config.validationMaxQueries,
+        comparisonMaxPageFetches: ctx.config.comparisonMaxPageFetches,
+        investigationMaxPageFetches: ctx.config.investigationMaxPageFetches,
+        validationMaxPageFetches: ctx.config.validationMaxPageFetches,
+        discoveryEvidenceBatchSize: ctx.config.discoveryEvidenceBatchSize,
       },
     });
   });
@@ -107,6 +112,21 @@ export function createApp(ctx: WorkflowContext) {
     if (!q || q.projectId !== c.req.param('id'))
       throw new WorkflowError('raw response not found', 'not_found', 404);
     return c.json({ raw: { id: raw.id, provider: raw.provider, createdAt: raw.createdAt, body: raw.body } });
+  });
+
+  app.get('/api/projects/:id/evidence/:evId/text', (c) => {
+    const e = ctx.repos.getEvidence(c.req.param('evId'));
+    if (!e || e.projectId !== c.req.param('id'))
+      throw new WorkflowError('evidence not found', 'not_found', 404);
+    return c.json({
+      evidenceId: e.id,
+      fetchStatus: e.fetchStatus,
+      textTruncated: e.textTruncated,
+      textChars: e.textChars,
+      textHash: e.textHash,
+      pageTitle: e.pageTitle,
+      text: e.fullText,
+    });
   });
 
   // ---- Discovery ----

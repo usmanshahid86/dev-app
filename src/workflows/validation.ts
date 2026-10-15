@@ -1,15 +1,17 @@
 /**
- * Validation / re-check: fresh bounded search around the original assumptions, new evidence
- * recorded separately (new run, new evidence rows), original research never overwritten.
+ * Validation / re-check: fresh bounded search around the original assumptions, selective page fetch,
+ * new evidence recorded separately (new run, new discoveries), original research never overwritten.
  */
 import type { WorkflowContext } from './context';
 import { WorkflowError } from './context';
 import { executeQueries } from './search';
-import { createRun, setStage, bumpProgress, finishRun, launch } from './runs';
+import { selectAndFetch, buildPackets } from './fetch';
+import { createRun, setStage, bumpProgress, finishRun, launch, runAgent } from './runs';
 import { planValidation, reviewValidation } from '@providers/agent/ops';
 import { toAgentOpportunity } from './investigation';
 import { evidenceForOpportunity } from '@domain/lineage';
-import type { ResearchRun, ValidationReview } from '@domain/types';
+import { validateFindings } from '@domain/findings';
+import type { Evidence, ResearchRun, ValidationReview } from '@domain/types';
 import { newId, nowIso } from '@domain/ids';
 import { assertTransition } from '@domain/workflow';
 
@@ -32,6 +34,7 @@ export function startValidation(
   const run = createRun(ctx, projectId, 'validation', [buildPackageId], {
     maxQueries: ctx.config.validationMaxQueries,
     maxResultsPerQuery: ctx.config.discoveryMaxResultsPerQuery,
+    maxPageFetches: ctx.config.validationMaxPageFetches,
   });
   const version =
     repos.listValidationReviews(projectId).filter((v) => v.buildPackageId === buildPackageId).length + 1;
@@ -58,28 +61,26 @@ export function startValidation(
     reviewId: review.id,
     buildPackageId,
     version,
+    budget: run.budget,
   });
   launch(
     run.id,
     async () => {
       setStage(ctx, run, 'planning');
       const assumptions = decision.agentRecommendation.criticalAssumptions;
-      const plan = await ctx.providers.agent.run(planValidation, {
+      const plan = await runAgent(ctx, run, planValidation, {
         opportunity: toAgentOpportunity(opp),
         assumptions,
         maxQueries: run.budget.maxQueries,
       });
-      bumpProgress(ctx, run.id, {
-        queriesPlanned: Math.min(plan.output.queries.length, run.budget.maxQueries),
-      });
+      bumpProgress(ctx, run.id, { queriesPlanned: Math.min(plan.queries.length, run.budget.maxQueries) });
       setStage(ctx, run, 'searching');
       const search = await executeQueries(
         ctx,
         run,
-        plan.output.queries.map((q) => ({ ...q, family: 'validation' as const })),
+        plan.queries.map((q) => ({ ...q, family: 'validation' as const })),
         {
           maxResultsPerQuery: run.budget.maxResultsPerQuery,
-          dedupeAcrossProject: false,
           onProgress: (p) =>
             bumpProgress(ctx, run.id, {
               queriesCompleted: p.completed,
@@ -90,49 +91,64 @@ export function startValidation(
       );
       if (search.fatal)
         throw new Error(`Search provider needs attention (${search.fatal.action}): ${search.fatal.message}`);
+      setStage(ctx, run, 'fetching_pages');
+      await selectAndFetch(ctx, run, toAgentOpportunity(opp), search.evidence, 'validation');
       setStage(ctx, run, 'reviewing');
+      // "New evidence" = every source this run observed (new or rediscovered), re-read for fetch state.
+      const all = new Map(repos.listEvidence(projectId).map((e) => [e.id, e]));
+      const newEvidence = search.evidence.map((e) => all.get(e.id)).filter((e): e is Evidence => Boolean(e));
+      const newIds = new Set(newEvidence.map((e) => e.id));
+      const originalEvidence = evidenceForOpportunity(opp, repos.listSignals(projectId), [
+        ...all.values(),
+      ]).filter((e) => !newIds.has(e.id));
       const qText = new Map(repos.listQueries(projectId).map((q) => [q.id, q.query]));
-      const toAgent = (list: typeof search.evidence) =>
-        list.map((e) => ({
+      const res = await runAgent(ctx, run, reviewValidation, {
+        opportunity: toAgentOpportunity(opp),
+        assumptions,
+        originalEvidence: originalEvidence.map((e) => ({
           id: e.id,
           url: e.url,
           title: e.title,
           snippet: e.snippet,
           query: qText.get(e.queryId) ?? '',
-        }));
-      const originalEvidence = evidenceForOpportunity(
-        opp,
-        repos.listSignals(projectId),
-        repos.listEvidence(projectId),
-      ).filter((e) => !search.evidence.some((n) => n.id === e.id));
-      const res = await ctx.providers.agent.run(reviewValidation, {
-        opportunity: toAgentOpportunity(opp),
-        assumptions,
-        originalEvidence: toAgent(originalEvidence),
-        newEvidence: toAgent(search.evidence),
+          category: e.category,
+          domain: e.domain,
+        })),
+        newEvidence: buildPackets(ctx, projectId, newEvidence),
         whatWeBuilt: review.whatWeBuilt,
         implementationLessons: review.implementationLessons,
       });
-      const newIds = new Set(search.evidence.map((e) => e.id));
       const assumptionIds = new Set(assumptions.map((a) => a.id));
-      const findings = res.output.findings.map((f) => ({
+      const allowed = new Map(newEvidence.map((e) => [e.id, e]));
+      const validated = validateFindings(res.findings, allowed);
+      const findings = validated.map((v) => ({
         id: newId('finding'),
         projectId,
         investigationId: review.id,
-        section: f.section,
-        claim: f.claim,
-        kind: f.evidenceIds.some((id) => newIds.has(id)) ? f.kind : ('inference' as const),
-        supportStrength: f.supportStrength,
-        evidenceIds: f.evidenceIds.filter((id) => newIds.has(id)),
+        section: v.section,
+        claim: v.claim,
+        kind: v.kind,
+        supportStrength: v.supportStrength,
+        evidenceIds: v.evidenceIds,
+        supportLevel: v.supportLevel,
+        excerpts: v.excerpts,
         createdAt: nowIso(),
       }));
       repos.createFindings(findings);
+      for (const f of findings)
+        telemetry.emit('finding_created', projectId, {
+          findingId: f.id,
+          investigationId: review.id,
+          kind: f.kind,
+          supportLevel: f.supportLevel,
+          evidenceIds: f.evidenceIds,
+        });
       repos.updateValidationReview(review.id, {
         newEvidenceIds: [...newIds],
-        assumptionStatus: res.output.assumptionStatus.filter((a) => assumptionIds.has(a.assumptionId)),
-        externalChanges: res.output.externalChanges,
-        verdict: res.output.verdict,
-        rationale: res.output.rationale,
+        assumptionStatus: res.assumptionStatus.filter((a) => assumptionIds.has(a.assumptionId)),
+        externalChanges: res.externalChanges,
+        verdict: res.verdict,
+        rationale: res.rationale,
         status: search.failed ? 'partial' : 'completed',
       });
       finishRun(
@@ -145,7 +161,7 @@ export function startValidation(
       telemetry.emit('validation_completed', projectId, {
         runId: run.id,
         reviewId: review.id,
-        verdict: res.output.verdict,
+        verdict: res.verdict,
         newEvidence: newIds.size,
       });
     },

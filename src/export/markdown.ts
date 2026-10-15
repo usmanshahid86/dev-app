@@ -4,6 +4,7 @@
  */
 import type { ProjectSnapshot } from '@workflows/projects';
 import type { Evidence, Finding, ProductBrief, Decision, BuildPackage, Opportunity } from '@domain/types';
+import { SUPPORT_LEVEL_LABEL } from '@domain/findings';
 
 const demoBanner = (snap: ProjectSnapshot) =>
   snap.project.mode === 'demo'
@@ -11,13 +12,26 @@ const demoBanner = (snap: ProjectSnapshot) =>
     : '';
 
 function evidenceLine(e: Evidence): string {
-  return `- [${e.id}] ${e.isDemo ? '[DEMO] ' : ''}${e.title} — ${e.url}`;
+  const fetch =
+    e.fetchStatus === 'fetched'
+      ? `page read in full${e.textTruncated ? ' (truncated)' : ''}`
+      : e.fetchStatus === 'snippet_only'
+        ? 'search snippet only'
+        : `page not available (${e.fetchStatus})`;
+  return `- [${e.id}] ${e.isDemo ? '[DEMO] ' : ''}${e.title} — ${e.canonicalUrl || e.url} · ${e.category} · ${fetch}`;
 }
 
 function findingLine(f: Finding, byId: Map<string, Evidence>): string {
   const refs = f.evidenceIds.map((id) => byId.get(id)).filter((x): x is Evidence => Boolean(x));
   const kind = f.kind === 'sourced_fact' ? 'sourced' : 'inference';
-  return `- **${f.id}** (${kind}, ${f.supportStrength}) ${f.claim}${refs.length ? `\n  Evidence: ${refs.map((e) => `${e.id} <${e.url}>`).join(', ')}` : ''}`;
+  const support = SUPPORT_LEVEL_LABEL[f.supportLevel];
+  const ex = f.excerpts
+    .map(
+      (x) =>
+        `\n  > ${x.verified ? '' : '[UNVERIFIED] '}"${x.excerpt}" — ${x.evidenceId}${x.verified ? '' : ` (${x.note})`}`,
+    )
+    .join('');
+  return `- **${f.id}** (${kind}, ${f.supportStrength}; support: ${support}) ${f.claim}${refs.length ? `\n  Evidence: ${refs.map((e) => `${e.id} <${e.canonicalUrl || e.url}>`).join(', ')}` : ''}${ex}`;
 }
 
 function replaceFindingMarkers(body: string): string {
@@ -51,7 +65,19 @@ export function renderProjectBrief(snap: ProjectSnapshot): string {
   for (const [i, s] of brief.sections.entries()) {
     out.push(`## ${i + 1}. ${s.title}\n\n${replaceFindingMarkers(s.body)}\n`);
   }
+  const levels = findings.reduce<Record<string, number>>(
+    (acc, f) => (
+      (acc[SUPPORT_LEVEL_LABEL[f.supportLevel]] = (acc[SUPPORT_LEVEL_LABEL[f.supportLevel]] ?? 0) + 1),
+      acc
+    ),
+    {},
+  );
   out.push(`## ${brief.sections.length + 1}. Findings\n`);
+  out.push(
+    `_Support: ${Object.entries(levels)
+      .map(([k, v]) => `${v} × ${k.toLowerCase()}`)
+      .join(', ')}. A search snippet and an inspected source page are not the same support._\n`,
+  );
   out.push(findings.map((f) => findingLine(f, evById)).join('\n') + '\n');
   out.push(`## ${brief.sections.length + 2}. Sources\n`);
   out.push(

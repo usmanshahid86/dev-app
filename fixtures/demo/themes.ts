@@ -10,6 +10,8 @@ import type { OpportunityDimensions, SignalType } from '@domain/types';
 export interface DemoSignal {
   key: string;
   theme: DemoThemeId;
+  /** Signals sharing a phenomenon describe the SAME underlying observation and are consolidated. */
+  phenomenon: string;
   type: SignalType;
   observation: string;
   inference: string;
@@ -21,6 +23,7 @@ export interface DemoSignal {
 export const DEMO_SIGNALS: DemoSignal[] = [
   {
     key: 'agent-context.repaste',
+    phenomenon: 'agent-context.handoff',
     theme: 'agent-context',
     type: 'repeated_pain',
     observation:
@@ -33,6 +36,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'agent-context.multi-tool',
+    phenomenon: 'agent-context.handoff',
     theme: 'agent-context',
     type: 'workaround_manual_process',
     observation:
@@ -45,6 +49,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'agent-context.portability',
+    phenomenon: 'agent-context.handoff',
     theme: 'agent-context',
     type: 'missing_feature',
     observation:
@@ -56,6 +61,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'agent-context.standard',
+    phenomenon: 'agent-context.standard',
     theme: 'agent-context',
     type: 'technical_capability_change',
     observation:
@@ -67,6 +73,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'agent-context.adoption',
+    phenomenon: 'agent-context.adoption',
     theme: 'agent-context',
     type: 'adoption_evidence',
     observation:
@@ -78,6 +85,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'local-first.complexity',
+    phenomenon: 'local-first.complexity',
     theme: 'local-first-sync',
     type: 'repeated_pain',
     observation:
@@ -89,6 +97,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'local-first.incumbent-pricing',
+    phenomenon: 'local-first.pricing',
     theme: 'local-first-sync',
     type: 'expensive_incumbent',
     observation:
@@ -100,6 +109,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'local-first.shutdown',
+    phenomenon: 'local-first.shutdown',
     theme: 'local-first-sync',
     type: 'product_shutdown_deprecation',
     observation:
@@ -111,6 +121,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'local-first.capability',
+    phenomenon: 'local-first.capability',
     theme: 'local-first-sync',
     type: 'technical_capability_change',
     observation:
@@ -122,6 +133,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'billing.manual-metering',
+    phenomenon: 'billing.manual',
     theme: 'usage-billing',
     type: 'workaround_manual_process',
     observation:
@@ -133,6 +145,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'billing.incumbent-pricing',
+    phenomenon: 'billing.pricing',
     theme: 'usage-billing',
     type: 'expensive_incumbent',
     observation:
@@ -144,6 +157,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'billing.api-change',
+    phenomenon: 'billing.api',
     theme: 'usage-billing',
     type: 'platform_api_change',
     observation:
@@ -155,6 +169,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'billing.distribution',
+    phenomenon: 'billing.distribution',
     theme: 'usage-billing',
     type: 'distribution_opportunity',
     observation:
@@ -167,6 +182,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'llm-cost.attribution',
+    phenomenon: 'llm-cost.attribution',
     theme: 'llm-cost',
     type: 'repeated_pain',
     observation:
@@ -178,6 +194,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'llm-cost.incumbent-pricing',
+    phenomenon: 'llm-cost.pricing',
     theme: 'llm-cost',
     type: 'expensive_incumbent',
     observation:
@@ -189,6 +206,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'llm-cost.pricing-churn',
+    phenomenon: 'llm-cost.churn',
     theme: 'llm-cost',
     type: 'pricing_change',
     observation:
@@ -200,6 +218,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'compliance.cost',
+    phenomenon: 'compliance.manual-evidence',
     theme: 'compliance-smb',
     type: 'expensive_incumbent',
     observation:
@@ -211,6 +230,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'compliance.buyer-pressure',
+    phenomenon: 'compliance.pressure',
     theme: 'compliance-smb',
     type: 'regulatory_policy_change',
     observation:
@@ -222,6 +242,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'compliance.automation-gap',
+    phenomenon: 'compliance.manual-evidence',
     theme: 'compliance-smb',
     type: 'missing_feature',
     observation:
@@ -233,6 +254,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'webhook.reliability-pain',
+    phenomenon: 'webhook.pain',
     theme: 'webhook-reliability',
     type: 'repeated_pain',
     observation:
@@ -244,6 +266,7 @@ export const DEMO_SIGNALS: DemoSignal[] = [
   },
   {
     key: 'webhook.incumbent-strong',
+    phenomenon: 'webhook.incumbent',
     theme: 'webhook-reliability',
     type: 'competitor_movement',
     observation:

@@ -5,6 +5,7 @@ const PREFIX: Record<string, string> = {
   query: 'qry',
   raw: 'raw',
   evidence: 'ev',
+  discovery: 'disc',
   signal: 'sig',
   cluster: 'cl',
   opportunity: 'opp',

@@ -1,11 +1,14 @@
 /**
- * Shared search execution: persists planned queries, raw responses and normalized evidence.
- * Failures are recorded per query; a run with some failed queries completes as 'partial'.
- * Demo (fixture) results are never produced here as a fallback for a failed real search.
+ * Shared search execution: persists planned queries, raw responses, canonical sources (evidence rows)
+ * and every discovery relationship. A source found by three queries is ONE evidence row with THREE
+ * evidence_discoveries rows. Failures are recorded per query; a run with some failed queries completes
+ * as 'partial'. Demo (fixture) results are never produced here as a fallback for a failed real search.
  */
 import type { WorkflowContext } from './context';
-import type { Evidence, QueryFamily, ResearchQuery, ResearchRun } from '@domain/types';
+import type { Evidence, EvidenceDiscovery, QueryFamily, ResearchQuery, ResearchRun } from '@domain/types';
 import { newId, nowIso } from '@domain/ids';
+import { canonicalizeUrl } from '@domain/canonicalUrl';
+import { classifySource } from '@domain/sourceCategory';
 import { SearchProviderError } from '@providers/search/SearchProvider';
 
 export interface PlannedQueryInput {
@@ -16,13 +19,15 @@ export interface PlannedQueryInput {
 
 export interface SearchExecutionResult {
   queries: ResearchQuery[];
+  /** Every evidence row touched by this run (newly created + rediscovered), deduplicated. */
   evidence: Evidence[];
+  /** Only the evidence rows created by this run. */
+  newEvidence: Evidence[];
+  discoveries: EvidenceDiscovery[];
   failed: number;
-  /** Set when every query failed with a non-retryable provider error (e.g. login needed). */
+  /** Set when a non-retryable provider error (e.g. login needed) stopped the run. */
   fatal?: { message: string; action: string };
 }
-
-const MIN_SNIPPET_CHARS = 20;
 
 export async function executeQueries(
   ctx: WorkflowContext,
@@ -30,9 +35,6 @@ export async function executeQueries(
   planned: PlannedQueryInput[],
   opts: {
     maxResultsPerQuery: number;
-    /** Skip URLs already held as evidence in this project (default true). Validation sets false so fresh
-     *  observations of a known page are recorded as NEW evidence rather than silently dropped. */
-    dedupeAcrossProject?: boolean;
     onProgress?: (p: { completed: number; failed: number; evidence: number }) => void;
   },
 ): Promise<SearchExecutionResult> {
@@ -63,10 +65,9 @@ export async function executeQueries(
       query: q.query,
     });
 
-  const allEvidence: Evidence[] = [];
-  const seenUrls = new Set(
-    opts.dedupeAcrossProject === false ? [] : repos.listEvidence(run.projectId).map((e) => e.url),
-  );
+  const touched = new Map<string, Evidence>();
+  const created: Evidence[] = [];
+  const discoveries: EvidenceDiscovery[] = [];
   let completed = 0;
   let failed = 0;
   let lastFatal: SearchProviderError | null = null;
@@ -78,28 +79,105 @@ export async function executeQueries(
       const rawId = newId('raw');
       repos.createRawResponse({ id: rawId, queryId: q.id, provider: res.provider, body: res.rawText });
       const retrievedAt = nowIso();
-      const evidence: Evidence[] = [];
+      let newCount = 0;
+      let rediscovered = 0;
+      let dropped = 0;
       for (const item of res.items) {
-        if (!item.url || seenUrls.has(item.url)) continue;
-        if ((item.snippet ?? '').length < MIN_SNIPPET_CHARS && !item.title) continue;
-        seenUrls.add(item.url);
-        evidence.push({
-          id: newId('evidence'),
+        const canon = item.url ? canonicalizeUrl(item.url) : null;
+        if (!canon) {
+          dropped++;
+          continue;
+        }
+        let ev =
+          touched.get(canon.canonicalUrl) ?? repos.getEvidenceByCanonical(run.projectId, canon.canonicalUrl);
+        const isNew = !ev;
+        if (!ev) {
+          const cls = classifySource(item.url, item.title);
+          ev = {
+            id: newId('evidence'),
+            projectId: run.projectId,
+            queryId: q.id,
+            url: item.url,
+            canonicalUrl: canon.canonicalUrl,
+            domain: canon.domain,
+            title: item.title,
+            snippet: item.snippet,
+            position: item.position,
+            providerMeta: item.providerMeta,
+            provider: res.provider,
+            retrievedAt,
+            fullText: null,
+            isDemo: res.isDemo,
+            category: cls.category,
+            categoryConfidence: cls.confidence,
+            fetchStatus: 'snippet_only',
+            finalUrl: null,
+            httpStatus: null,
+            contentType: null,
+            pageTitle: null,
+            textTruncated: false,
+            textChars: null,
+            textHash: null,
+            fetchedAt: null,
+            fetchError: null,
+            fetchRunId: null,
+          };
+          repos.createEvidence([ev]);
+          created.push(ev);
+          newCount++;
+          telemetry.emit('source_canonicalized', run.projectId, {
+            evidenceId: ev.id,
+            url: item.url,
+            canonicalUrl: canon.canonicalUrl,
+            domain: canon.domain,
+            category: cls.category,
+            categoryConfidence: cls.confidence,
+            rule: cls.rule,
+          });
+          telemetry.emit('evidence_created', run.projectId, {
+            evidenceId: ev.id,
+            queryId: q.id,
+            url: ev.url,
+            isDemo: ev.isDemo,
+          });
+        } else {
+          rediscovered++;
+          // Keep the richer snippet if this discovery has one and the page was never fetched.
+          if (ev.fetchStatus === 'snippet_only' && item.snippet.length > ev.snippet.length + 40) {
+            repos.updateEvidence(ev.id, { snippet: item.snippet });
+            ev = { ...ev, snippet: item.snippet };
+          }
+          telemetry.emit('source_rediscovered', run.projectId, {
+            evidenceId: ev.id,
+            queryId: q.id,
+            runId: run.id,
+            position: item.position,
+            previousQueryId: ev.queryId,
+          });
+        }
+        touched.set(canon.canonicalUrl, ev);
+        const disc: EvidenceDiscovery = {
+          id: newId('discovery'),
           projectId: run.projectId,
+          evidenceId: ev.id,
           queryId: q.id,
-          url: item.url,
-          title: item.title,
-          snippet: item.snippet,
+          runId: run.id,
           position: item.position,
-          providerMeta: item.providerMeta,
           provider: res.provider,
+          providerMeta: item.providerMeta,
+          url: item.url,
           retrievedAt,
-          fullText: null,
-          isDemo: res.isDemo,
+        };
+        repos.createDiscoveries([disc]);
+        discoveries.push(disc);
+        telemetry.emit('search_result_persisted', run.projectId, {
+          discoveryId: disc.id,
+          evidenceId: ev.id,
+          queryId: q.id,
+          position: item.position,
+          isNew,
         });
       }
-      repos.createEvidence(evidence);
-      allEvidence.push(...evidence);
       repos.updateQuery(q.id, {
         status: 'completed',
         executedAt: retrievedAt,
@@ -113,18 +191,15 @@ export async function executeQueries(
         queryId: q.id,
         provider: res.provider,
         resultCount: res.items.length,
-        evidenceCount: evidence.length,
+        requestedMaxResults: opts.maxResultsPerQuery,
+        newEvidence: newCount,
+        rediscovered,
+        dropped,
         durationMs: res.durationMs,
         isDemo: res.isDemo,
         costMicros: res.meta.costMicros ?? null,
+        decision: res.meta.decision ?? null,
       });
-      for (const e of evidence)
-        telemetry.emit('evidence_created', run.projectId, {
-          evidenceId: e.id,
-          queryId: q.id,
-          url: e.url,
-          isDemo: e.isDemo,
-        });
     } catch (err) {
       failed++;
       const message = err instanceof Error ? err.message : String(err);
@@ -142,7 +217,6 @@ export async function executeQueries(
         ['login', 'connect', 'check_access'].includes(err.action)
       ) {
         lastFatal = err;
-        // Credentials/registration problems will not fix themselves mid-run: stop spending queries.
         for (const rest of queries.slice(queries.indexOf(q) + 1)) {
           repos.updateQuery(rest.id, { status: 'failed', error: `skipped: ${err.action} required` });
           failed++;
@@ -150,11 +224,13 @@ export async function executeQueries(
         break;
       }
     }
-    opts.onProgress?.({ completed, failed, evidence: allEvidence.length });
+    opts.onProgress?.({ completed, failed, evidence: touched.size });
   }
   return {
     queries: repos.listQueries(run.projectId, run.id),
-    evidence: allEvidence,
+    evidence: [...touched.values()],
+    newEvidence: created,
+    discoveries,
     failed,
     fatal: lastFatal
       ? {

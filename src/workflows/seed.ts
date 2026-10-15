@@ -5,6 +5,7 @@
 import type { WorkflowContext } from './context';
 import { FixtureSearchProvider } from '@providers/search/fixture';
 import { FixtureAgentProvider } from '@providers/agent/fixture';
+import { FixturePageFetcher } from '@providers/fetch/fixture';
 import { createProject } from './projects';
 import { startDiscovery } from './discovery';
 import { startComparison, startDeepInvestigation } from './investigation';
@@ -18,7 +19,12 @@ export async function seedDemoProject(
 ) {
   const ctx: WorkflowContext = {
     ...base,
-    providers: { search: new FixtureSearchProvider(), agent: new FixtureAgentProvider(), mode: 'demo' },
+    providers: {
+      search: new FixtureSearchProvider(),
+      agent: new FixtureAgentProvider(),
+      pageFetcher: new FixturePageFetcher(),
+      mode: 'demo',
+    },
   };
   const project = createProject(ctx, {
     title: opts.title ?? 'DEMO — Exploring broadly (no idea yet)',

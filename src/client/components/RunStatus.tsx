@@ -5,23 +5,27 @@ const DISCOVERY_STEPS: Array<{ key: RunStageLabel; label: string }> = [
   { key: 'planning', label: 'Planning' },
   { key: 'searching', label: 'Searching' },
   { key: 'extracting_signals', label: 'Extracting signals' },
+  { key: 'consolidating_signals', label: 'Consolidating' },
   { key: 'clustering', label: 'Clustering' },
   { key: 'building_opportunities', label: 'Building opportunities' },
 ];
 const INVESTIGATION_STEPS: Array<{ key: RunStageLabel; label: string }> = [
   { key: 'planning', label: 'Planning' },
   { key: 'searching', label: 'Searching' },
+  { key: 'fetching_pages', label: 'Reading pages' },
   { key: 'synthesizing', label: 'Synthesizing brief' },
   { key: 'recommending', label: 'Recommending' },
 ];
 const COMPARISON_STEPS: Array<{ key: RunStageLabel; label: string }> = [
   { key: 'planning', label: 'Planning' },
   { key: 'searching', label: 'Searching' },
+  { key: 'fetching_pages', label: 'Reading pages' },
   { key: 'comparing', label: 'Comparing' },
 ];
 const VALIDATION_STEPS: Array<{ key: RunStageLabel; label: string }> = [
   { key: 'planning', label: 'Planning' },
   { key: 'searching', label: 'Searching' },
+  { key: 'fetching_pages', label: 'Reading pages' },
   { key: 'reviewing', label: 'Reviewing' },
 ];
 
@@ -62,7 +66,13 @@ export function RunStatus({ run }: { run: ResearchRun }) {
       <div className="small muted">
         {p.queriesCompleted}/{p.queriesPlanned} queries done
         {p.queriesFailed ? `, ${p.queriesFailed} failed` : ''} · {p.evidenceCount} evidence
-        {run.kind === 'discovery' ? ` · ${p.signalCount} signals` : ''}
+        {run.kind === 'discovery'
+          ? ` · ${p.signalCount} raw signals → ${p.consolidatedSignalCount} consolidated`
+          : ''}
+        {run.budget.maxPageFetches > 0
+          ? ` · pages ${p.pageFetchesCompleted} read / ${p.pageFetchesSelected} selected${p.pageFetchesFailed ? ` / ${p.pageFetchesFailed} failed` : ''}`
+          : ''}
+        {p.agentRetries ? ` · ${p.agentRetries} agent retr${p.agentRetries === 1 ? 'y' : 'ies'}` : ''}
       </div>
       {run.error && (
         <div

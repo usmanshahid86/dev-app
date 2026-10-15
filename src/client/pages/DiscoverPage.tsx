@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useProjectCtx, useSnapshot } from '../lib/useProject';
 import { RunStatus } from '../components/RunStatus';
-import { Dimensions, StatusBadge, DemoTag, Inference } from '../components/Badges';
+import { Dimensions, StatusBadge, DemoTag, Inference, CorroborationLine } from '../components/Badges';
 import { EvidenceChip, SignalChip } from '../components/Inspector';
+import { rawSignalsForConsolidated } from '@domain/lineage';
 import {
   emptyProfile,
   type DiscoveryProfile,
@@ -544,8 +545,10 @@ function OpportunityCard({
       <h3>{o.title}</h3>
       <div className="opp-thesis">{o.thesis}</div>
       <Dimensions d={o.dimensions} />
+      <CorroborationLine c={o.corroboration} compact />
       <div className="small muted">
-        {signals.length} signals · {evidenceIds.length} evidence · {o.openQuestions.length} open questions
+        {signals.length} consolidated signal{signals.length === 1 ? '' : 's'} · {evidenceIds.length} sources ·{' '}
+        {o.majorUncertainties.length} major unknown{o.majorUncertainties.length === 1 ? '' : 's'}
       </div>
       {expanded && (
         <div className="opp-detail" onClick={(e) => e.stopPropagation()}>
@@ -562,20 +565,30 @@ function OpportunityCard({
             {o.whyNow}
           </div>
           <div className="full">
-            <div className="label">Evidence</div>
+            <div className="label">Why this opportunity exists</div>
             {o.evidenceSummary}
+            <div style={{ marginTop: 6 }}>
+              <CorroborationLine c={o.corroboration} />
+            </div>
             <div style={{ marginTop: 6 }} className="stack">
-              {signals.map((s) => (
-                <div key={s.id} className="small">
-                  <SignalChip id={s.id} /> <span className="badge badge-neutral">{s.type}</span>{' '}
-                  {s.observation}
-                  <div className="row" style={{ marginTop: 2 }}>
-                    {s.evidenceIds.map((e) => (
-                      <EvidenceChip key={e} id={e} from="opportunity-card" />
-                    ))}
+              {signals.map((s) => {
+                const raws = rawSignalsForConsolidated(s, snap.signals);
+                return (
+                  <div key={s.id} className="small">
+                    <SignalChip id={s.id} /> <span className="badge badge-neutral">{s.type}</span>{' '}
+                    {s.observation}
+                    {raws.length > 1 && (
+                      <span className="muted"> — consolidated from {raws.length} raw signals</span>
+                    )}
+                    {s.stats && <div className="muted">{s.stats.summary}</div>}
+                    <div className="row" style={{ marginTop: 2 }}>
+                      {s.evidenceIds.map((e) => (
+                        <EvidenceChip key={e} id={e} from="opportunity-card" />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
           <div>

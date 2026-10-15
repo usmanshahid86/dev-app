@@ -10,7 +10,15 @@ export interface AppConfig {
   discoveryMaxResultsPerQuery: number;
   investigationMaxQueries: number;
   validationMaxQueries: number;
-  jevlin: { bin: string; configPath: string; tier: string };
+  /** Evidence items per signal-extraction agent call. */
+  discoveryEvidenceBatchSize: number;
+  comparisonMaxPageFetches: number;
+  investigationMaxPageFetches: number;
+  validationMaxPageFetches: number;
+  pageFetcher: 'http' | 'fixture';
+  /** Chars of fetched page text handed to the agent per evidence packet. */
+  packetMaxChars: number;
+  jevlin: { bin: string; configPath: string; tier: string; maxResultsLimit: number };
   claudeCli: { bin: string; model: string };
   anthropic: { model: string };
 }
@@ -33,6 +41,10 @@ const int = (v: string | undefined, d: number) => {
   const n = Number.parseInt(v ?? '', 10);
   return Number.isFinite(n) && n > 0 ? n : d;
 };
+const nonneg = (v: string | undefined, d: number) => {
+  const n = Number.parseInt(v ?? '', 10);
+  return Number.isFinite(n) && n >= 0 ? n : d;
+};
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   loadDotEnv();
@@ -42,19 +54,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`DEVAPP_SEARCH_PROVIDER must be fixture|jevlin (got ${sp})`);
   if (!['fixture', 'claude-cli', 'anthropic-api'].includes(ap))
     throw new Error(`DEVAPP_AGENT_PROVIDER must be fixture|claude-cli|anthropic-api (got ${ap})`);
+  if (env.DEVAPP_PAGE_FETCHER && !['http', 'fixture'].includes(env.DEVAPP_PAGE_FETCHER))
+    throw new Error(`DEVAPP_PAGE_FETCHER must be http|fixture (got ${env.DEVAPP_PAGE_FETCHER})`);
   return {
     searchProvider: sp as AppConfig['searchProvider'],
     agentProvider: ap as AppConfig['agentProvider'],
     dbPath: env.DEVAPP_DB_PATH ?? 'data/devapp.sqlite',
     port: int(env.DEVAPP_PORT, 4100),
     discoveryMaxQueries: int(env.DEVAPP_DISCOVERY_MAX_QUERIES, 12),
-    discoveryMaxResultsPerQuery: int(env.DEVAPP_DISCOVERY_MAX_RESULTS_PER_QUERY, 8),
+    // 20 = the largest depth the stable fast tier honours (25 returned an empty "chosen: -1" answer); see docs/DECISIONS.md #24.
+    discoveryMaxResultsPerQuery: int(env.DEVAPP_DISCOVERY_MAX_RESULTS_PER_QUERY, 20),
     investigationMaxQueries: int(env.DEVAPP_INVESTIGATION_MAX_QUERIES, 8),
     validationMaxQueries: int(env.DEVAPP_VALIDATION_MAX_QUERIES, 5),
+    discoveryEvidenceBatchSize: int(env.DEVAPP_DISCOVERY_EVIDENCE_BATCH_SIZE, 25),
+    comparisonMaxPageFetches: nonneg(env.DEVAPP_COMPARISON_MAX_PAGE_FETCHES, 4),
+    investigationMaxPageFetches: nonneg(env.DEVAPP_INVESTIGATION_MAX_PAGE_FETCHES, 8),
+    validationMaxPageFetches: nonneg(env.DEVAPP_VALIDATION_MAX_PAGE_FETCHES, 3),
+    pageFetcher:
+      (env.DEVAPP_PAGE_FETCHER as 'http' | 'fixture' | undefined) ?? (sp === 'fixture' ? 'fixture' : 'http'),
+    packetMaxChars: int(env.DEVAPP_PACKET_MAX_CHARS, 3000),
     jevlin: {
       bin: env.JEVLIN_BIN ?? `${env.HOME ?? ''}/.local/bin/jevlin`,
       configPath: env.JEVLIN_CONFIG ?? `${env.HOME ?? ''}/.jevlin/jevlin.toml`,
       tier: env.JEVLIN_TIER ?? 'fast',
+      maxResultsLimit: int(env.JEVLIN_MAX_RESULTS_LIMIT, 20),
     },
     claudeCli: { bin: env.CLAUDE_BIN ?? 'claude', model: env.CLAUDE_MODEL ?? 'sonnet' },
     anthropic: { model: env.ANTHROPIC_MODEL ?? 'claude-sonnet-5-5' },

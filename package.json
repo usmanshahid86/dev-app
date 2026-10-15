@@ -25,9 +25,11 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",
     "@hono/node-server": "^2.1.5",
+    "@mozilla/readability": "^0.6.0",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
+    "linkedom": "^0.18.13",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.4",

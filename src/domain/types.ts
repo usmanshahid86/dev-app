@@ -82,7 +82,9 @@ export const ValidationVerdict = z.enum(['CONTINUE', 'CHANGE_WEDGE', 'PIVOT', 'S
 export type ValidationVerdict = z.infer<typeof ValidationVerdict>;
 
 export const SupportStrength = z.enum(['strong', 'medium', 'weak']);
+export type SupportStrength = z.infer<typeof SupportStrength>;
 export const FindingKind = z.enum(['sourced_fact', 'inference']);
+export type FindingKind = z.infer<typeof FindingKind>;
 
 export const OpportunityStatus = z.enum([
   'candidate',
@@ -96,6 +98,40 @@ export type OpportunityStatus = z.infer<typeof OpportunityStatus>;
 
 export const ProviderMode = z.enum(['demo', 'real']);
 export type ProviderMode = z.infer<typeof ProviderMode>;
+
+export const SourceCategory = z.enum([
+  'official_docs',
+  'pricing',
+  'changelog',
+  'issue_tracker',
+  'forum_community',
+  'social',
+  'news',
+  'research_benchmark',
+  'marketplace',
+  'review',
+  'regulatory_government',
+  'repository',
+  'blog',
+  'other',
+]);
+export type SourceCategoryValue = z.infer<typeof SourceCategory>;
+
+export const FetchStatus = z.enum([
+  'snippet_only',
+  'fetch_pending',
+  'fetched',
+  'fetch_failed',
+  'unavailable',
+]);
+export type FetchStatus = z.infer<typeof FetchStatus>;
+
+/** How well a finding is supported by its evidence. Computed programmatically, never by the agent. */
+export const SupportLevel = z.enum(['full_page_excerpt_verified', 'full_page', 'snippet_only', 'inference']);
+export type SupportLevel = z.infer<typeof SupportLevel>;
+
+export const SignalKind = z.enum(['raw', 'consolidated']);
+export type SignalKind = z.infer<typeof SignalKind>;
 
 // ---------- Discovery profile ----------
 
@@ -143,7 +179,9 @@ export type RunStatus = z.infer<typeof RunStatus>;
 export const RunStageLabel = z.enum([
   'planning',
   'searching',
+  'fetching_pages',
   'extracting_signals',
+  'consolidating_signals',
   'clustering',
   'building_opportunities',
   'comparing',
@@ -158,6 +196,8 @@ export type RunStageLabel = z.infer<typeof RunStageLabel>;
 export const ResearchBudget = z.object({
   maxQueries: z.number().int().positive(),
   maxResultsPerQuery: z.number().int().positive(),
+  /** Full-page fetches allowed in this run (0 = snippet-only). */
+  maxPageFetches: z.number().int().nonnegative().default(0),
 });
 export type ResearchBudget = z.infer<typeof ResearchBudget>;
 
@@ -177,6 +217,11 @@ export const ResearchRun = z.object({
     queriesFailed: z.number().int().default(0),
     evidenceCount: z.number().int().default(0),
     signalCount: z.number().int().default(0),
+    consolidatedSignalCount: z.number().int().default(0),
+    pageFetchesSelected: z.number().int().default(0),
+    pageFetchesCompleted: z.number().int().default(0),
+    pageFetchesFailed: z.number().int().default(0),
+    agentRetries: z.number().int().default(0),
     message: z.string().optional(),
   }),
   error: z.string().nullable(),
@@ -202,21 +247,71 @@ export const ResearchQuery = z.object({
 });
 export type ResearchQuery = z.infer<typeof ResearchQuery>;
 
+/**
+ * Evidence = one canonical source page per project. The first discovery is kept on the row for
+ * backward compatibility (queryId/position/providerMeta); every discovery (including rediscoveries by
+ * other queries/runs) is an EvidenceDiscovery row.
+ */
 export const Evidence = z.object({
   id: z.string(),
   projectId: z.string(),
   queryId: z.string(),
   url: z.string(),
+  canonicalUrl: z.string(),
+  domain: z.string(),
   title: z.string(),
   snippet: z.string(),
   position: z.number().nullable(),
   providerMeta: z.record(z.string(), z.unknown()).nullable(),
   provider: z.string(),
   retrievedAt: z.string(),
+  /** Readable page text when fetched (bounded; see textTruncated). Excluded from snapshots. */
   fullText: z.string().nullable(),
   isDemo: z.boolean(),
+  category: SourceCategory.default('other'),
+  categoryConfidence: z.enum(['high', 'medium', 'low']).default('low'),
+  fetchStatus: FetchStatus.default('snippet_only'),
+  finalUrl: z.string().nullable().default(null),
+  httpStatus: z.number().nullable().default(null),
+  contentType: z.string().nullable().default(null),
+  pageTitle: z.string().nullable().default(null),
+  textTruncated: z.boolean().default(false),
+  textChars: z.number().int().nullable().default(null),
+  textHash: z.string().nullable().default(null),
+  fetchedAt: z.string().nullable().default(null),
+  fetchError: z.string().nullable().default(null),
+  fetchRunId: z.string().nullable().default(null),
 });
 export type Evidence = z.infer<typeof Evidence>;
+
+export const EvidenceDiscovery = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  evidenceId: z.string(),
+  queryId: z.string(),
+  runId: z.string(),
+  position: z.number().nullable(),
+  provider: z.string(),
+  providerMeta: z.record(z.string(), z.unknown()).nullable(),
+  /** The URL exactly as returned by this discovery (may differ from the canonical form). */
+  url: z.string(),
+  retrievedAt: z.string(),
+});
+export type EvidenceDiscovery = z.infer<typeof EvidenceDiscovery>;
+
+export const Corroboration = z.object({
+  evidenceCount: z.number().int(),
+  canonicalSources: z.number().int(),
+  domains: z.number().int(),
+  discoveries: z.number().int(),
+  categoryMix: z.record(z.string(), z.number().int()),
+  distinctSourceTypes: z.number().int(),
+  firstParty: z.number().int(),
+  thirdParty: z.number().int(),
+  fetchedPages: z.number().int(),
+  summary: z.string(),
+});
+export type Corroboration = z.infer<typeof Corroboration>;
 
 // ---------- Signals, clusters, opportunities ----------
 
@@ -224,6 +319,12 @@ export const Signal = z.object({
   id: z.string(),
   projectId: z.string(),
   runId: z.string(),
+  /** raw = extracted from one evidence batch; consolidated = merged across batches (clusters/opportunities cite these). */
+  kind: SignalKind.default('raw'),
+  /** For consolidated signals: the raw signals it was built from. Raw signals are never deleted. */
+  componentSignalIds: z.array(z.string()).default([]),
+  /** Transparent strength characteristics (consolidated signals). */
+  stats: Corroboration.nullable().default(null),
   type: SignalType,
   /** What the source actually says. */
   observation: z.string(),
@@ -272,6 +373,7 @@ export const Opportunity = z.object({
   majorUncertainties: z.array(z.string()),
   openQuestions: z.array(z.string()),
   dimensions: OpportunityDimensions,
+  corroboration: Corroboration.nullable().default(null),
   status: OpportunityStatus,
   /** Set when the developer brought their own direction instead of discovering. */
   seeded: z.boolean(),
@@ -311,6 +413,15 @@ export const Investigation = z.object({
 });
 export type Investigation = z.infer<typeof Investigation>;
 
+export const SupportingExcerpt = z.object({
+  evidenceId: z.string(),
+  excerpt: z.string(),
+  verified: z.boolean(),
+  /** 'full_page' | 'snippet' when verified; failure reason otherwise. */
+  note: z.string(),
+});
+export type SupportingExcerpt = z.infer<typeof SupportingExcerpt>;
+
 export const Finding = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -320,6 +431,9 @@ export const Finding = z.object({
   kind: FindingKind,
   supportStrength: SupportStrength,
   evidenceIds: z.array(z.string()),
+  /** Computed from evidence fetch state + excerpt verification; never set by the agent. */
+  supportLevel: SupportLevel.default('snippet_only'),
+  excerpts: z.array(SupportingExcerpt).default([]),
   createdAt: z.string(),
 });
 export type Finding = z.infer<typeof Finding>;
@@ -468,6 +582,20 @@ export const EventType = z.enum([
   'search_completed',
   'search_failed',
   'evidence_created',
+  'search_result_persisted',
+  'source_canonicalized',
+  'source_rediscovered',
+  'page_fetch_selected',
+  'page_fetch_completed',
+  'page_fetch_failed',
+  'raw_signal_created',
+  'signals_consolidated',
+  'consolidated_signal_created',
+  'corroboration_computed',
+  'evidence_used_in_finding',
+  'evidence_excerpt_verified',
+  'evidence_excerpt_rejected',
+  'agent_retry',
   'signal_created',
   'cluster_created',
   'opportunity_created',

@@ -10,6 +10,7 @@ import {
   ResearchRun,
   ResearchQuery,
   Evidence,
+  EvidenceDiscovery,
   Signal,
   SignalCluster,
   Opportunity,
@@ -63,6 +64,7 @@ export class Repositories {
   deleteProject(id: string): void {
     const tables = [
       t.events,
+      t.evidenceDiscoveries,
       t.validationReviews,
       t.buildPackages,
       t.decisions,
@@ -178,6 +180,36 @@ export class Repositories {
       .where(eq(t.evidence.queryId, queryId))
       .all()
       .map((r) => Evidence.parse(r));
+  }
+  getEvidenceByCanonical(projectId: string, canonicalUrl: string): Evidence | null {
+    const row = this.db
+      .select()
+      .from(t.evidence)
+      .where(and(eq(t.evidence.projectId, projectId), eq(t.evidence.canonicalUrl, canonicalUrl)))
+      .get();
+    return row ? Evidence.parse(row) : null;
+  }
+  updateEvidence(id: string, patch: Partial<Evidence>): void {
+    this.db.update(t.evidence).set(patch).where(eq(t.evidence.id, id)).run();
+  }
+  createDiscoveries(rows: EvidenceDiscovery[]): void {
+    if (rows.length) this.db.insert(t.evidenceDiscoveries).values(rows).run();
+  }
+  listDiscoveries(projectId: string): EvidenceDiscovery[] {
+    return this.db
+      .select()
+      .from(t.evidenceDiscoveries)
+      .where(eq(t.evidenceDiscoveries.projectId, projectId))
+      .all()
+      .map((r) => EvidenceDiscovery.parse(r));
+  }
+  listDiscoveriesByRun(runId: string): EvidenceDiscovery[] {
+    return this.db
+      .select()
+      .from(t.evidenceDiscoveries)
+      .where(eq(t.evidenceDiscoveries.runId, runId))
+      .all()
+      .map((r) => EvidenceDiscovery.parse(r));
   }
 
   // ---- Signals / clusters / opportunities ----

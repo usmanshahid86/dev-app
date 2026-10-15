@@ -1,6 +1,12 @@
 import type { WorkflowContext } from './context';
 import { WorkflowError } from './context';
-import { DiscoveryProfile, type OpportunityStatus, type Project, type WorkflowStage } from '@domain/types';
+import {
+  DiscoveryProfile,
+  type Evidence,
+  type OpportunityStatus,
+  type Project,
+  type WorkflowStage,
+} from '@domain/types';
 import { newId, nowIso } from '@domain/ids';
 import { assertTransition, canTransition } from '@domain/workflow';
 
@@ -94,7 +100,62 @@ export function recordEvidenceViewed(
   ctx.telemetry.emit('evidence_viewed', projectId, { evidenceId, from });
 }
 
-/** Full project snapshot for the client: one request, everything needed to render any screen. */
+/**
+ * Per-source usage flags (missed-evidence preparation for Search R&D): what happened to every
+ * returned result. Derived from stored lineage + events; no opaque score.
+ */
+export interface EvidenceUsage {
+  returned: number; // discovery count
+  promoted: true;
+  fetchSelected: boolean;
+  fetched: boolean;
+  usedInRawSignal: boolean;
+  usedInConsolidatedSignal: boolean;
+  usedInOpportunity: boolean;
+  usedInFinding: boolean;
+  inspectedByHuman: boolean;
+}
+
+export function computeEvidenceUsage(ctx: WorkflowContext, projectId: string): Record<string, EvidenceUsage> {
+  const r = ctx.repos;
+  const evidence = r.listEvidence(projectId);
+  const discoveries = r.listDiscoveries(projectId);
+  const signals = r.listSignals(projectId);
+  const opportunities = r.listOpportunities(projectId);
+  const findings = r.listFindings(projectId);
+  const viewed = new Set(
+    r
+      .listEvents(projectId, 5000)
+      .filter((e) => e.type === 'evidence_viewed')
+      .map((e) => String(e.payload.evidenceId)),
+  );
+  const raw = new Set(signals.filter((s) => s.kind === 'raw').flatMap((s) => s.evidenceIds));
+  const cons = new Set(signals.filter((s) => s.kind === 'consolidated').flatMap((s) => s.evidenceIds));
+  const sigById = new Map(signals.map((s) => [s.id, s]));
+  const inOpp = new Set(
+    opportunities.flatMap((o) => o.signalIds.flatMap((id) => sigById.get(id)?.evidenceIds ?? [])),
+  );
+  const inFinding = new Set(findings.flatMap((f) => f.evidenceIds));
+  const discCount = new Map<string, number>();
+  for (const d of discoveries) discCount.set(d.evidenceId, (discCount.get(d.evidenceId) ?? 0) + 1);
+  const out: Record<string, EvidenceUsage> = {};
+  for (const e of evidence) {
+    out[e.id] = {
+      returned: discCount.get(e.id) ?? 1,
+      promoted: true,
+      fetchSelected: e.fetchStatus !== 'snippet_only',
+      fetched: e.fetchStatus === 'fetched',
+      usedInRawSignal: raw.has(e.id),
+      usedInConsolidatedSignal: cons.has(e.id),
+      usedInOpportunity: inOpp.has(e.id),
+      usedInFinding: inFinding.has(e.id),
+      inspectedByHuman: viewed.has(e.id),
+    };
+  }
+  return out;
+}
+
+/** Full project snapshot for the client: one request, everything needed to render any screen. Page text is excluded (see /evidence/:id/text). */
 export function projectSnapshot(ctx: WorkflowContext, projectId: string) {
   const r = ctx.repos;
   const project = requireProject(ctx, projectId);
@@ -102,7 +163,9 @@ export function projectSnapshot(ctx: WorkflowContext, projectId: string) {
     project,
     runs: r.listRuns(projectId),
     queries: r.listQueries(projectId),
-    evidence: r.listEvidence(projectId),
+    evidence: r.listEvidence(projectId).map((e) => ({ ...e, fullText: null }) as Evidence),
+    discoveries: r.listDiscoveries(projectId),
+    evidenceUsage: computeEvidenceUsage(ctx, projectId),
     signals: r.listSignals(projectId),
     clusters: r.listClusters(projectId),
     opportunities: r.listOpportunities(projectId),

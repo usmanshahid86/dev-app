@@ -1,4 +1,34 @@
-# V0 status
+# Status (V0 → V0.1)
+
+## V0.1 — trustworthy opportunity discovery (added 2026-10-15)
+
+Working and tested:
+
+- **Canonical sources + discovery provenance**: one evidence row per canonical URL per project, an `evidence_discoveries` row per (query, result); the inspector lists every query that found a source. V0 rows backfilled on upgrade.
+- **Source classification**: 14 rule-based categories with confidence; shown on evidence, in the brief's sources list and in corroboration mixes.
+- **Cross-batch consolidation**: raw signals kept; consolidated signals carry component ids, evidence union and transparent stats; clusters/opportunities cite consolidated signals only. Programmatic guards against invented ids and double use.
+- **Corroboration**: counts (sources, domains, discoveries, category mix, source types, first/third-party, pages read) plus a templated sentence on every consolidated signal and opportunity card. No composite score.
+- **Selective full-page retrieval**: `PageFetcher` boundary; SSRF-guarded HTTP fetcher (scheme/host/IP/DNS/redirect/size/timeout/content-type checks, no JS, Readability extraction, hash, truncation flag); per-run budgets (discovery 0, comparison 4, deep 8, validation 3); agent chooses sources under budget; fetch state and errors persisted on evidence.
+- **Evidence packets + validated findings**: agents reason from bounded page text where fetched; every finding passes programmatic validation (unknown ids dropped, fact→inference demotion, excerpt verification against the cited record's own text); computed `supportLevel` with four levels, shown in UI and exports.
+- **Research Inspector**: finding → fact/inference → support → excerpts → evidence (category, fetch state, retained text) → discoveries → signals → opportunity; evidence usage flags; "other results from the same search" labelled as not necessarily relevant or used.
+- **Telemetry**: 13 new event types (docs/TELEMETRY.md) incl. excerpt verified/rejected and agent retries.
+- **Jevlin depth**: requests 20 results per query (fast tier returns ≤10; V0's cap of 8 dropped results); empty `chosen=-1` answers surfaced as failures.
+- **Migration 0001 + backfill**, tested fresh and V0 → V0.1 (`tests/db/migration.test.ts`), applied to the real `data/devapp.sqlite`.
+- **Tests**: 139 (was 44).
+- **Dogfood**: one bounded real-mode discovery run; see docs/DOGFOOD-01.md.
+
+Known limitations (material):
+
+- DNS rebinding between the pre-check and the socket connect is not prevented (docs/EVIDENCE-PIPELINE.md §6).
+- A run interrupted by process exit stays `running` until marked by hand (happened in dogfood attempt 1); no startup sweep yet.
+- One agent retry, no repair prompt; the fixture agent's consolidation is phenomenon-keyed and only exercises the guards, not agent judgement.
+- Source classification is rule-based; real-world `other` rate is high (see DOGFOOD-01).
+- Page text is retained up to 60k chars; packets hand the agent only the first 3000 chars of each fetched page, so long pages are effectively sampled from the top.
+- Comparison splits a small fetch budget across candidates (4 ÷ 2–3), so comparative findings are mostly snippet-level.
+
+---
+
+# V0 status (unchanged below)
 
 ## Working (end to end, tested)
 

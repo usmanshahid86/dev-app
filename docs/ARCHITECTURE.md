@@ -22,10 +22,10 @@ client (React)  ──HTTP──▶  server/app.ts (Hono, validation only)
                         workflows/*  (discovery, investigation, decision, buildPackage, validation)
                           │       │
                 db/repositories   providers/
-                  (SQLite)      ┌──┴────────────┐
-                            SearchProvider   AgentProvider
-                            ├ jevlin (CLI)   ├ claude-cli (CLI)
-                            └ fixture        ├ anthropic-api (SDK)
+                  (SQLite)      ┌──┴────────────┬──────────────┐
+                            SearchProvider   AgentProvider   PageFetcher
+                            ├ jevlin (CLI)   ├ claude-cli    ├ http (SSRF-guarded, Readability)
+                            └ fixture        ├ anthropic-api └ fixture
                                              └ fixture
                 domain/  — Zod types, workflow state machine, lineage helpers (pure; shared with client)
                 telemetry/ — local structured events (table `events`)
@@ -38,6 +38,7 @@ Rules:
 - `workflows/` are the only callers of providers and the only writers of workflow state. Each stage persists before the next begins so failures leave inspectable partial state.
 - `db/repositories.ts` is the only module that knows table shapes; everything it returns is parsed through the domain Zod schemas.
 - Providers never see domain persistence; they take plain inputs and return validated outputs. Raw provider payloads are stored separately (`raw_responses`) from normalized evidence.
+- Agent output is never trusted for identity or support: workflows filter ids against what they handed the agent, `domain/findings.ts` computes support levels from stored evidence state, and `domain/excerpts.ts` verifies quotes against retained page text. The full pipeline is in `docs/EVIDENCE-PIPELINE.md`.
 
 ## Workflow state
 
@@ -56,7 +57,11 @@ Every research operation is a `research_runs` row with kind, budget, provider na
 
 ## Budgets
 
-Configurable via env: `DEVAPP_DISCOVERY_MAX_QUERIES` (12), `DEVAPP_DISCOVERY_MAX_RESULTS_PER_QUERY` (8), `DEVAPP_INVESTIGATION_MAX_QUERIES` (8), `DEVAPP_VALIDATION_MAX_QUERIES` (5). A Jevlin fast-tier search cost 3000 micro-dollars in the smoke test, so a default discovery run is ≈ $0.04 of search plus a handful of agent calls.
+Configurable via env: `DEVAPP_DISCOVERY_MAX_QUERIES` (12), `DEVAPP_DISCOVERY_MAX_RESULTS_PER_QUERY` (20), `DEVAPP_INVESTIGATION_MAX_QUERIES` (8), `DEVAPP_VALIDATION_MAX_QUERIES` (5), page-fetch budgets `DEVAPP_COMPARISON/INVESTIGATION/VALIDATION_MAX_PAGE_FETCHES` (4 / 8 / 3; discovery is always 0), `DEVAPP_DISCOVERY_EVIDENCE_BATCH_SIZE` (25). Budgets and actual counts are persisted on each run. A Jevlin fast-tier search costs 3000 micro-dollars regardless of depth, so a default discovery run is ≈ $0.04 of search plus a handful of agent calls (the dogfood run spent $0.033 on search).
+
+## Migrations
+
+Drizzle SQL migrations are checked in (`0000_init`, `0001_evidence_sources_consolidation`). Because Drizzle migrations are SQL-only, `db/backfill.ts` runs idempotently after them on every open to fill derived columns for pre-V0.1 rows (canonical URL, domain, category, first-discovery rows). `tests/db/migration.test.ts` covers both a fresh install and a V0 → V0.1 upgrade.
 
 ## Demo vs real
 

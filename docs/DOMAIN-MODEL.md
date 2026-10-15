@@ -33,13 +33,17 @@ Source evidence → Observed signal → Opportunity hypothesis → Product resea
 
 ## Invariants enforced in code
 
-- A signal without a real evidence id is never persisted (`discovery.ts` filters agent output against the batch it was given).
-- An opportunity without signals is never persisted.
-- A `sourced_fact` finding whose evidence ids do not exist is demoted to `inference` rather than silently kept.
+- A raw signal without a real evidence id from its own batch is never persisted.
+- Every raw signal belongs to exactly one consolidated signal; consolidated signals cite only existing raw signals; raw signals are never deleted.
+- An opportunity without consolidated signals is never persisted; its evidence is the union of its signals' evidence.
+- A canonical URL appears once per project; every search result produces a discovery row.
+- A `sourced_fact` finding whose evidence ids do not exist is demoted to `inference`; an inference never becomes a fact by citing evidence.
+- Excerpts are verified only against the text of the evidence record they cite; `supportLevel` is computed, never agent-set.
+- Page fetches never exceed `budget.maxPageFetches`; discovery runs have a budget of 0.
 - A build package cannot be generated from an agent recommendation alone; `userDecision` must be BUILD or PIVOT.
 - Backward navigation changes `stage` only; no artifact is deleted (`tests/workflows/e2e.test.ts`).
 - `danglingReferences()` in `domain/lineage.ts` checks evidence→signal→opportunity integrity and is asserted in tests.
 
 ## Ids
 
-Prefixed, 16-hex ids (`prj_`, `run_`, `qry_`, `raw_`, `ev_`, `sig_`, `cl_`, `opp_`, `inv_`, `fnd_`, `brf_`, `dec_`, `asm_`, `bp_`, `req_`, `val_`, `evt_`) so a reference is readable in Markdown exports and in the UI chips.
+Prefixed, 16-hex ids (`prj_`, `run_`, `qry_`, `raw_`, `ev_`, `disc_`, `sig_`, `cl_`, `opp_`, `inv_`, `fnd_`, `brf_`, `dec_`, `asm_`, `bp_`, `req_`, `val_`, `evt_`) so a reference is readable in Markdown exports and in the UI chips.

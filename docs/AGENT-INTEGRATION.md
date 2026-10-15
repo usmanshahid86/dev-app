@@ -37,7 +37,9 @@ Workflows call `providers.agent.run(op, input)`. The domain never stores provide
 | `generateBuildPackage`                | opportunity, human decision, assumptions, findings, brief, profile | build package sections + requirements linked to assumption/finding ids                                           |
 | `planValidation` / `reviewValidation` | assumptions, old+new evidence, what we built                       | queries; assumption statuses + verdict CONTINUE/CHANGE_WEDGE/PIVOT/STOP                                          |
 
-Every prompt shares one system preamble: separate what sources say from what is inferred; never invent ids, URLs, numbers or quotes; say when evidence is thin. JSON Schemas are generated from the Zod outputs (`structured.ts`).
+Every prompt shares one system preamble: separate what sources say from what is inferred; never invent ids, URLs, numbers or quotes; say when evidence is thin. Finding prompts additionally require verbatim excerpts, which are validated programmatically (docs/EVIDENCE-PIPELINE.md §7) — the agent's labels are never trusted for support level. JSON Schemas are generated from the Zod outputs (`structured.ts`).
+
+Every agent call goes through `workflows/runs.ts::runAgent`, which retries once on a retryable failure (malformed structured output, timeout) and records `agent_retry` on the run.
 
 ## Providers
 
@@ -64,6 +66,7 @@ Deterministic canned reasoning over the demo corpus (`fixtures/demo/themes.ts`).
 
 ## Not done yet
 
-- No automatic retry of a malformed structured output (one attempt per op).
+- One retry only; no repair prompt that feeds validation errors back to the model.
 - No prompt caching / batching for the API adapter.
 - Effort/model selection per op is a hint only.
+- Source classification is rule-based; no agent fallback for `other`.

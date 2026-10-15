@@ -20,7 +20,8 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
     "smoke:jevlin": "tsx scripts/smoke-jevlin.ts",
-    "smoke:agent": "tsx scripts/smoke-agent.ts"
+    "smoke:agent": "tsx scripts/smoke-agent.ts",
+    "dogfood": "tsx scripts/dogfood.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

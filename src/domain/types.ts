@@ -639,6 +639,7 @@ export const EventType = z.enum([
   'agent_retry',
   'search_retry',
   'retrieval_summarized',
+  'retrieval_backfilled',
   'signal_created',
   'cluster_created',
   'opportunity_created',

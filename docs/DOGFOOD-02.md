@@ -207,3 +207,17 @@ Compared with attempt 1 (no searches), the search stage changed: A crowding medi
 7. **Rate-limit behaviour measured from outside the app:** before the owner's change, 1 search per 60 s; after, a burst bucket of roughly 6–7 requests that refills over minutes (90 s → 4, ≥4 min → 6), well below the stated 1000/hour ceiling in practice. The app sends its six comparison searches within ~10 s, so it needs the bucket full at launch.
 
 No code was changed for this report. Observations 1, 2 and 4 are design limitations already recorded in V0 decisions, kept for the product review rather than fixed.
+
+## Addendum (2026-10-16): historical retrieval status backfilled
+
+After V0.1.1 (commit `bde7fd9`) the five investigations above were back-filled from their persisted query rows and `search_failed` events with `npm run backfill:retrieval --apply --project prj_2fe15839b8714483`:
+
+| Attempt | Investigation          | Status before → after | Retrieval | Note                                     |
+| ------- | ---------------------- | --------------------- | --------- | ---------------------------------------- |
+| 1       | `inv_427ebd6231e24701` | completed → partial   | none      | 0 of 6 searches executed: 6 rate-limited |
+| 2       | `inv_ecfbe9a167be40d5` | completed → partial   | partial   | 1 of 6 searches executed: 5 rate-limited |
+| 3       | `inv_4828e4bfd12a42b7` | completed → partial   | partial   | 1 of 6 searches executed: 5 rate-limited |
+| 4       | `inv_8e049b3edc614a87` | completed → partial   | partial   | 4 of 6 searches executed: 2 rate-limited |
+| 5       | `inv_d89895a7dc3947a3` | completed → completed | complete  | 6 of 6 searches executed                 |
+
+Nothing else changed (75 findings, 212 evidence, 232 discoveries, 42 queries, 6 run rows untouched; no failure codes written to historical query rows). Each change is recorded as a `retrieval_backfilled` event. Historical findings keep `retrievalOrigin: unknown`.

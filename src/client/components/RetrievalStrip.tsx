@@ -26,7 +26,7 @@ export function RetrievalStrip({
 }) {
   if (inv.retrieval === null || inv.retrieval === undefined) {
     return (
-      <div className="notice notice-info" style={{ marginBottom: 10 }}>
+      <div className="notice notice-info" style={{ marginBottom: 10 }} data-testid="retrieval-strip">
         Retrieval status unknown: this {kind} predates retrieval tracking. Treat its conclusions as resting on
         earlier research only.
       </div>

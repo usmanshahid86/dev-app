@@ -104,15 +104,26 @@ export const EvidencePacket = EvidenceForAgent.extend({
   /** Bounded readable text (first N chars of the fetched page) or empty for snippet-only. */
   pageText: z.string().default(''),
   pageTruncated: z.boolean().default(false),
+  /** Discovery origin relative to the current run ('new' = first found by this run's searches). */
+  origin: z.enum(['new', 'inherited']).default('inherited'),
+  /** True when this run's searches also returned the source (even if first found earlier). */
+  returnedThisRun: z.boolean().default(false),
 });
 export type EvidencePacket = z.infer<typeof EvidencePacket>;
+
+const originLabel = (e: EvidencePacket) =>
+  e.origin === 'new'
+    ? 'NEW IN THIS RUN'
+    : e.returnedThisRun
+      ? 'INHERITED (also returned by this run)'
+      : 'INHERITED FROM EARLIER RESEARCH';
 
 const packetText = (packets: EvidencePacket[]) =>
   packets
     .map((e) =>
       e.support === 'full_page'
-        ? `### ${e.id} | ${e.title} | ${e.url} | category: ${e.category} | FULL PAGE (${e.pageTruncated ? 'truncated' : 'complete'}) | q: "${e.query}"\n${e.pageText}`
-        : `### ${e.id} | ${e.title} | ${e.url} | category: ${e.category} | SNIPPET ONLY (page not fetched) | q: "${e.query}"\n${e.snippet}`,
+        ? `### ${e.id} | ${e.title} | ${e.url} | category: ${e.category} | FULL PAGE (${e.pageTruncated ? 'truncated' : 'complete'}) | ${originLabel(e)} | q: "${e.query}"\n${e.pageText}`
+        : `### ${e.id} | ${e.title} | ${e.url} | category: ${e.category} | SNIPPET ONLY (page not fetched) | ${originLabel(e)} | q: "${e.query}"\n${e.snippet}`,
     )
     .join('\n\n');
 

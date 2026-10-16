@@ -59,7 +59,8 @@ describe('failure handling', () => {
         return flaky.search(q, o);
       },
     };
-    const ctx = makeCtx({ search });
+    // retries off: this test checks how a non-retried failure is recorded
+    const ctx = makeCtx({ search, config: { searchMaxRetriesPerQuery: 0 } });
     const p = createProject(ctx, {});
     startDiscovery(ctx, p.id);
     await drain();

@@ -59,6 +59,10 @@ describe('UI smoke', () => {
     );
     expect(await screen.findByText(/Product Brief v1/)).toBeInTheDocument();
     expect(await screen.findByText(/1\. Executive summary/)).toBeInTheDocument();
+    // retrieval strips above the comparison table and the brief (seeded runs execute every search)
+    const strips = await screen.findAllByTestId('retrieval-strip');
+    expect(strips.length).toBeGreaterThanOrEqual(2);
+    expect(strips[0]!.textContent).toMatch(/Fresh retrieval complete/);
     fireEvent.click(screen.getByRole('link', { name: /^Decision/ }));
     await waitFor(() => expect(screen.getByText(/Agent recommends/)).toBeInTheDocument());
     expect(screen.getByText('BUILD', { selector: 'strong' })).toBeInTheDocument();

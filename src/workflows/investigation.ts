@@ -5,8 +5,8 @@
  */
 import type { WorkflowContext } from './context';
 import { WorkflowError } from './context';
-import { executeQueries } from './search';
-import { selectAndFetch, buildPackets } from './fetch';
+import { executeQueries, describeOutcomes } from './search';
+import { selectAndFetch, buildPackets, evidenceOrigins } from './fetch';
 import { createRun, setStage, bumpProgress, finishRun, launch, runAgent } from './runs';
 import { evidenceForOpportunity, signalsForOpportunity } from '@domain/lineage';
 import { validateFindings } from '@domain/findings';
@@ -27,6 +27,8 @@ import type {
   ResearchRun,
   ProductBrief,
   Decision,
+  QueryOutcomes,
+  RetrievalOrigin,
 } from '@domain/types';
 import { newId, nowIso } from '@domain/ids';
 import { assertTransition } from '@domain/workflow';
@@ -79,13 +81,21 @@ function persistFindings(
   investigationId: string,
   proposed: Parameters<typeof validateFindings>[0],
   allowed: Map<string, Evidence>,
+  runId: string,
 ): { findings: Finding[]; keyToId: Map<string, string> } {
   const validated = validateFindings(proposed, allowed);
   const keyToId = new Map<string, string>();
+  const origins = evidenceOrigins(ctx, runId);
+  const originOf = (ids: string[]): RetrievalOrigin => {
+    if (ids.length === 0) return 'none';
+    const fresh = ids.filter((id) => origins.created.has(id)).length;
+    return fresh === 0 ? 'inherited' : fresh === ids.length ? 'new' : 'mixed';
+  };
   const findings: Finding[] = validated.map((v) => {
     const id = newId('finding');
     keyToId.set(v.key, id);
     return {
+      retrievalOrigin: originOf(v.evidenceIds),
       id,
       projectId,
       investigationId,
@@ -107,6 +117,7 @@ function persistFindings(
       investigationId,
       kind: f.kind,
       supportLevel: f.supportLevel,
+      retrievalOrigin: f.retrievalOrigin,
       evidenceIds: f.evidenceIds,
       section: f.section,
       notes: v.notes,
@@ -156,6 +167,9 @@ export function startComparison(
     status: 'running',
     comparison: null,
     comparisonSummary: null,
+    retrieval: null,
+    retrievalNote: null,
+    candidateRetrieval: null,
     createdAt: nowIso(),
   });
   for (const o of opps) ctx.repos.setOpportunityStatus(o.id, 'comparing');
@@ -195,21 +209,24 @@ async function runComparison(
 ) {
   const { repos, telemetry } = ctx;
   setStage(ctx, run, 'planning');
-  const planned: Array<{ query: string; family: 'investigation'; purpose: string }> = [];
+  const perCandidatePlans: Array<Array<{ query: string; family: 'investigation'; purpose: string }>> = [];
   for (const o of opps) {
     const plan = await runAgent(ctx, run, planInvestigation, {
       opportunity: toAgentOpportunity(o),
       kind: 'comparative',
       maxQueries: perOpp,
     });
-    planned.push(
-      ...plan.queries.slice(0, perOpp).map((q) => ({
+    perCandidatePlans.push(
+      plan.queries.slice(0, perOpp).map((q) => ({
         query: q.query,
         family: 'investigation' as const,
         purpose: `[${o.id}] ${q.purpose}`,
       })),
     );
   }
+  // Deterministic round-robin (A1, B1, C1, A2, B2, C2): a rate limit that stops the run part-way
+  // costs every candidate equally instead of always the last one. Per-candidate budgets are unchanged.
+  const planned = interleave(perCandidatePlans);
   bumpProgress(ctx, run.id, { queriesPlanned: planned.length });
   setStage(ctx, run, 'searching');
   const search = await executeQueries(ctx, run, planned, {
@@ -223,12 +240,21 @@ async function runComparison(
   });
   if (search.fatal)
     throw new Error(`Search provider needs attention (${search.fatal.action}): ${search.fatal.message}`);
+  bumpProgress(ctx, run.id, {
+    retrieval: search.retrieval,
+    queryOutcomes: search.outcomes,
+    retrievalNote: search.retrievalNote,
+  });
 
-  // Selective page fetch: split the budget across candidates.
+  // Selective page fetch: split the budget across candidates. Inherited evidence stays eligible
+  // (fetching it raises its verification level; its discovery origin stays inherited).
   setStage(ctx, run, 'fetching_pages');
   const queryOpp = new Map(
     search.queries.map((q) => [q.id, q.purpose.match(/^\[(opp_[a-z0-9]+)\]/)?.[1] ?? null]),
   );
+  const candidateRetrieval: Record<string, QueryOutcomes> = {};
+  for (const o of opps)
+    candidateRetrieval[o.id] = outcomesFor(search.queries.filter((q) => queryOpp.get(q.id) === o.id));
   const perCandidate = new Map<string, Map<string, Evidence>>();
   for (const o of opps) {
     const runEv = search.evidence.filter((e) =>
@@ -266,11 +292,11 @@ async function runComparison(
     for (const [k, v] of allowed) allowedAll.set(k, v);
     return {
       opportunity: toAgentOpportunity(o),
-      evidence: buildPackets(ctx, project.id, [...allowed.values()]),
+      evidence: buildPackets(ctx, project.id, [...allowed.values()], run.id),
     };
   });
   const res = await runAgent(ctx, run, compareOpportunities, { candidates });
-  const { findings, keyToId } = persistFindings(ctx, project.id, inv.id, res.findings, allowedAll);
+  const { findings, keyToId } = persistFindings(ctx, project.id, inv.id, res.findings, allowedAll, run.id);
   const oppIds = new Set(opps.map((o) => o.id));
   const comparison = res.rows
     .filter((r) => oppIds.has(r.opportunityId))
@@ -278,17 +304,27 @@ async function runComparison(
       ...rest,
       findingIds: findingKeys.map((k) => keyToId.get(k)).filter((x): x is string => Boolean(x)),
     }));
-  repos.updateInvestigation(inv.id, { status: 'completed', comparison, comparisonSummary: res.summary });
+  // An investigation is 'completed' only when its own retrieval executed in full; otherwise 'partial'
+  // (results are kept, the UI/exports show the retrieval note).
+  repos.updateInvestigation(inv.id, {
+    status: search.retrieval === 'complete' ? 'completed' : 'partial',
+    comparison,
+    comparisonSummary: res.summary,
+    retrieval: search.retrieval,
+    retrievalNote: search.retrievalNote,
+    candidateRetrieval,
+  });
   finishRun(
     ctx,
     run.id,
-    search.failed ? 'partial' : 'completed',
-    search.failed ? `${search.failed} searches failed` : undefined,
+    search.retrieval === 'complete' ? 'completed' : 'partial',
+    search.retrieval === 'complete' ? undefined : search.retrievalNote,
   );
   telemetry.emit('investigation_completed', project.id, {
     runId: run.id,
     investigationId: inv.id,
     kind: 'comparative',
+    retrieval: search.retrieval,
     findings: findings.length,
     fullPageFindings: findings.filter((f) => f.supportLevel.startsWith('full_page')).length,
   });
@@ -319,6 +355,9 @@ export function startDeepInvestigation(
     status: 'running',
     comparison: null,
     comparisonSummary: null,
+    retrieval: null,
+    retrievalNote: null,
+    candidateRetrieval: null,
     createdAt: nowIso(),
   });
   for (const o of ctx.repos.listOpportunities(projectId))
@@ -389,6 +428,11 @@ async function runDeepInvestigation(
   );
   if (search.fatal)
     throw new Error(`Search provider needs attention (${search.fatal.action}): ${search.fatal.message}`);
+  bumpProgress(ctx, run.id, {
+    retrieval: search.retrieval,
+    queryOutcomes: search.outcomes,
+    retrievalNote: search.retrievalNote,
+  });
 
   // Selective full-page retrieval of the most consequential sources before synthesis.
   setStage(ctx, run, 'fetching_pages');
@@ -405,9 +449,9 @@ async function runDeepInvestigation(
   const brief = await runAgent(ctx, run, synthesizeBrief, {
     profile: project.discoveryProfile,
     opportunity: toAgentOpportunity(opp),
-    evidence: buildPackets(ctx, project.id, [...allowed.values()]),
+    evidence: buildPackets(ctx, project.id, [...allowed.values()], run.id),
   });
-  const { findings, keyToId } = persistFindings(ctx, project.id, inv.id, brief.findings, allowed);
+  const { findings, keyToId } = persistFindings(ctx, project.id, inv.id, brief.findings, allowed, run.id);
 
   const titles = new Map(BRIEF_SECTIONS.map((s) => [s.key, s.title]));
   const sections = BRIEF_SECTIONS.map((def) => {
@@ -482,12 +526,17 @@ async function runDeepInvestigation(
     assumptions: decision.agentRecommendation.criticalAssumptions.length,
   });
 
-  repos.updateInvestigation(inv.id, { status: 'completed' });
+  repos.updateInvestigation(inv.id, {
+    status: search.retrieval === 'complete' ? 'completed' : 'partial',
+    retrieval: search.retrieval,
+    retrievalNote: search.retrievalNote,
+    candidateRetrieval: { [opp.id]: search.outcomes },
+  });
   finishRun(
     ctx,
     run.id,
-    search.failed ? 'partial' : 'completed',
-    search.failed ? `${search.failed} searches failed` : undefined,
+    search.retrieval === 'complete' ? 'completed' : 'partial',
+    search.retrieval === 'complete' ? undefined : search.retrievalNote,
   );
   repos.updateProject(project.id, { stage: 'DECISION_READY', decisionStatus: 'recommended' });
   telemetry.emit('investigation_completed', project.id, {
@@ -499,6 +548,44 @@ async function runDeepInvestigation(
   });
   telemetry.emit('stage_changed', project.id, { from: 'INVESTIGATING', to: 'DECISION_READY' });
   void signalsForOpportunity;
+  void describeOutcomes;
+}
+
+/** Round-robin merge of per-candidate query plans, preserving each candidate's order. */
+export function interleave<T>(lists: T[][]): T[] {
+  const out: T[] = [];
+  const max = Math.max(0, ...lists.map((l) => l.length));
+  for (let i = 0; i < max; i++) for (const l of lists) if (i < l.length) out.push(l[i]!);
+  return out;
+}
+
+/** Outcome counts for a subset of a run's queries (per candidate), derived from persisted query rows. */
+export function outcomesFor(
+  queries: Array<{ status: string; resultCount: number | null; failureCode: string | null }>,
+): QueryOutcomes {
+  const o: QueryOutcomes = {
+    planned: queries.length,
+    succeeded: 0,
+    succeededEmpty: 0,
+    rateLimited: 0,
+    transportFailed: 0,
+    otherFailed: 0,
+    skipped: 0,
+    retries: 0,
+    waitedMs: 0,
+  };
+  for (const q of queries) {
+    if (q.status === 'completed') {
+      o.succeeded++;
+      if ((q.resultCount ?? 0) === 0) o.succeededEmpty++;
+    } else if (q.status === 'skipped') o.skipped++;
+    else if (q.status === 'failed') {
+      if (q.failureCode === 'rate_limited') o.rateLimited++;
+      else if (q.failureCode === 'transport') o.transportFailed++;
+      else o.otherFailed++;
+    }
+  }
+  return o;
 }
 
 function countBy(xs: string[]): Record<string, number> {

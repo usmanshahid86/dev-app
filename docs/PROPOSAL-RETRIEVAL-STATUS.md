@@ -1,6 +1,21 @@
 # Proposal: honest retrieval status for comparison and investigation runs
 
-Status: **proposal for review — no workflow code changed.** Motivated by DOGFOOD-02 attempt 1, which produced 13 complete-looking findings and a full side-by-side comparison from zero successful searches.
+Status: **approved with refinements (review of `b5613d0`) and implemented** as V0.1.1. Motivated by DOGFOOD-02 attempt 1, which produced 13 complete-looking findings and a full side-by-side comparison from zero successful searches.
+
+## 0. Review decisions incorporated
+
+| #   | Decision                                                                                                                                                    | Where it landed                                                                                                                                                                                                                   |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Retrieval execution status is separate from evidence provenance and from investigation completion; a successful empty search counts as executed             | `RetrievalStatus` + `QueryOutcomes` on `run.progress` and `investigations`; `succeededEmpty` counted; `retrieval` ≠ `status`                                                                                                      |
+| 2   | Keep discovery origin and verification level separate; inherited evidence stays eligible for page fetch                                                     | `Finding.retrievalOrigin` (new/inherited/mixed/none/unknown) alongside `supportLevel`; page selection unchanged; packets labelled `NEW IN THIS RUN` / `INHERITED (also returned by this run)` / `INHERITED FROM EARLIER RESEARCH` |
+| 3   | Replace "two consecutive refusals" with a bounded retry/wait policy honouring `retry_after_ms`; mark remaining queries skipped when the budget is exhausted | `executeQueries` (`search.ts`): `DEVAPP_SEARCH_RETRY_BUDGET_MS` (90 s), `DEVAPP_SEARCH_MAX_RETRIES_PER_QUERY` (1), default wait 5 s; `research_queries.status='skipped'`, `failure_code='retry_budget_exhausted'`                 |
+| 4   | Prevent candidate-order bias with deterministic round-robin                                                                                                 | `interleave()` in `investigation.ts`: A1, B1, C1, A2, B2, C2; per-candidate budgets unchanged                                                                                                                                     |
+| 5   | Retrieval status visible above the comparison table and the brief; zero-search runs must not look like completed fresh research                             | `RetrievalStrip` component; investigation `status='partial'` unless retrieval is complete; column header "provisional — no fresh search"; Markdown brief banner                                                                   |
+| 6   | Distinguish successful-empty, rate-limited, transport, unattempted                                                                                          | `QueryOutcomes {succeeded, succeededEmpty, rateLimited, transportFailed, otherFailed, skipped, retries, waitedMs}`; per-query `failure_code`                                                                                      |
+| 7   | Keep findings supported by inherited evidence; mark fresh-retrieval-dependent conclusions provisional                                                       | Findings persisted with `retrievalOrigin`; strip and column markers say "provisional"; nothing is dropped                                                                                                                         |
+| 8   | Minimal; prompts/providers/budgets/scoring unchanged; regression tests for zero/partial/full/empty and rate limits at different positions                   | Only the packet header gained an origin label; `tests/workflows/retrieval.test.ts` (12 tests)                                                                                                                                     |
+
+Dropped from the original proposal: item E (pacing interval) and item F (two-refusal termination), per decisions 3 and 8.
 
 ## 1. Diagnosis
 
@@ -22,7 +37,7 @@ Net: nothing in the pipeline is wrong per se — every finding is validated, eve
 - The app's six comparison searches go out ~1.5 s apart (`search.ts` loop, bounded only by provider latency), so a half-empty bucket at launch loses the tail of the plan — always the last candidate (C in attempt 4), which biases partial runs against later candidates.
 - Attempt 3's failure was self-inflicted: six pre-flight probes consumed the bucket seconds before launch. Attempt 1's was an exhausted quota that persisted ~2 h regardless of `retry_after_ms`.
 
-## 2. Proposal — smallest change set
+## 2. Original proposal (superseded by §0 where they differ)
 
 Each item is independent; (A)–(C) are the minimum to stop misreading; (D)–(F) address rate limiting. No prompt changes.
 

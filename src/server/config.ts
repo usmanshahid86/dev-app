@@ -18,6 +18,12 @@ export interface AppConfig {
   pageFetcher: 'http' | 'fixture';
   /** Chars of fetched page text handed to the agent per evidence packet. */
   packetMaxChars: number;
+  /** Total wall-clock a run may spend waiting on retryable search failures (retry_after_ms). */
+  searchRetryBudgetMs: number;
+  /** Retries per query on retryable failures. */
+  searchMaxRetriesPerQuery: number;
+  /** Wait used when a retryable failure carries no retry_after_ms. */
+  searchDefaultRetryWaitMs: number;
   jevlin: { bin: string; configPath: string; tier: string; maxResultsLimit: number };
   claudeCli: { bin: string; model: string };
   anthropic: { model: string };
@@ -73,6 +79,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     pageFetcher:
       (env.DEVAPP_PAGE_FETCHER as 'http' | 'fixture' | undefined) ?? (sp === 'fixture' ? 'fixture' : 'http'),
     packetMaxChars: int(env.DEVAPP_PACKET_MAX_CHARS, 3000),
+    searchRetryBudgetMs: nonneg(env.DEVAPP_SEARCH_RETRY_BUDGET_MS, 90_000),
+    searchMaxRetriesPerQuery: nonneg(env.DEVAPP_SEARCH_MAX_RETRIES_PER_QUERY, 1),
+    searchDefaultRetryWaitMs: nonneg(env.DEVAPP_SEARCH_DEFAULT_RETRY_WAIT_MS, 5_000),
     jevlin: {
       bin: env.JEVLIN_BIN ?? `${env.HOME ?? ''}/.local/bin/jevlin`,
       configPath: env.JEVLIN_CONFIG ?? `${env.HOME ?? ''}/.jevlin/jevlin.toml`,

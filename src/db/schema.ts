@@ -53,6 +53,7 @@ export const researchQueries = sqliteTable(
     resultCount: integer('result_count'),
     rawResponseId: text('raw_response_id'),
     error: text('error'),
+    failureCode: text('failure_code'),
   },
   (t) => [index('queries_run_idx').on(t.runId), index('queries_project_idx').on(t.projectId)],
 );
@@ -198,6 +199,9 @@ export const investigations = sqliteTable('investigations', {
   status: text('status').notNull(),
   comparison: text('comparison', { mode: 'json' }),
   comparisonSummary: text('comparison_summary'),
+  retrieval: text('retrieval'),
+  retrievalNote: text('retrieval_note'),
+  candidateRetrieval: text('candidate_retrieval', { mode: 'json' }),
   createdAt: text('created_at').notNull(),
 });
 
@@ -214,6 +218,7 @@ export const findings = sqliteTable(
     evidenceIds: text('evidence_ids', { mode: 'json' }).notNull(),
     supportLevel: text('support_level').notNull().default('snippet_only'),
     excerpts: text('excerpts', { mode: 'json' }).notNull().default('[]'),
+    retrievalOrigin: text('retrieval_origin').notNull().default('unknown'),
     createdAt: text('created_at').notNull(),
   },
   (t) => [index('findings_inv_idx').on(t.investigationId)],

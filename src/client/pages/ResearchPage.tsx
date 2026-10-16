@@ -6,6 +6,7 @@ import { RunStatus } from '../components/RunStatus';
 import { Markdown } from '../components/Markdown';
 import { DimBadge, DemoTag, SupportBadge, FetchBadge, CategoryBadge } from '../components/Badges';
 import { FindingChip, EvidenceChip, useInspector } from '../components/Inspector';
+import { RetrievalStrip, OriginTag } from '../components/RetrievalStrip';
 import type { Investigation, ProductBrief } from '@domain/types';
 
 export function ResearchPage() {
@@ -61,7 +62,7 @@ function ComparisonView({ inv }: { inv: Investigation }) {
     .map((id) => snap.opportunities.find((o) => o.id === id))
     .filter(Boolean) as typeof snap.opportunities;
   const canAct = snap.project.stage === 'COMPARING' || snap.project.stage === 'OPPORTUNITIES_READY';
-  if (inv.status !== 'completed' || !inv.comparison)
+  if ((inv.status !== 'completed' && inv.status !== 'partial') || !inv.comparison)
     return inv.status === 'failed' ? (
       <div className="notice notice-error" style={{ marginBottom: 12 }}>
         Comparison failed.
@@ -95,12 +96,27 @@ function ComparisonView({ inv }: { inv: Investigation }) {
           Comparison <span className="muted small">{new Date(inv.createdAt).toLocaleString()}</span>
         </h2>
       </div>
+      <RetrievalStrip
+        inv={inv}
+        kind="comparison"
+        candidates={opps.map((o) => ({ id: o.id, title: o.title }))}
+      />
       <table className="tbl compare">
         <thead>
           <tr>
             <th />{' '}
             {opps.map((o) => (
-              <th key={o.id}>{o.title}</th>
+              <th key={o.id}>
+                {o.title}
+                {inv.candidateRetrieval && (inv.candidateRetrieval[o.id]?.succeeded ?? 0) === 0 && (
+                  <div
+                    className="small"
+                    style={{ fontWeight: 400, color: 'var(--warn)', textTransform: 'none', letterSpacing: 0 }}
+                  >
+                    provisional — no fresh search
+                  </div>
+                )}
+              </th>
             ))}
           </tr>
         </thead>
@@ -205,6 +221,7 @@ function BriefView({ brief }: { brief: ProductBrief }) {
   const findings = snap.findings.filter((f) => f.investigationId === brief.investigationId);
   const cited = [...new Set(findings.flatMap((f) => f.evidenceIds))];
   const decision = snap.decisions.find((d) => d.briefId === brief.id);
+  const deepInv = snap.investigations.find((i) => i.id === brief.investigationId);
   const shown = findings.filter(
     (f) => filter === 'all' || (filter === 'sourced' ? f.kind === 'sourced_fact' : f.kind === 'inference'),
   );
@@ -230,6 +247,7 @@ function BriefView({ brief }: { brief: ProductBrief }) {
             )}
           </div>
         </div>
+        {deepInv && <RetrievalStrip inv={deepInv} kind="brief" />}
         <h1>{opp?.title}</h1>
         <p className="lead">{opp?.thesis}</p>
         {brief.sections.map((s, i) => (
@@ -288,6 +306,7 @@ function BriefView({ brief }: { brief: ProductBrief }) {
             <div className="row">
               <FindingChip id={f.id} inference={f.kind === 'inference'} />
               <SupportBadge level={f.supportLevel} />
+              <OriginTag origin={f.retrievalOrigin} />
               <span className="badge badge-neutral">{f.supportStrength}</span>
               <span className="muted small">{f.section}</span>
             </div>

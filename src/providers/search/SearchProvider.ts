@@ -43,6 +43,8 @@ export class SearchProviderError extends Error {
     public readonly retryable: boolean,
     public readonly action: SearchFailureAction,
     public readonly rawText?: string,
+    /** Router-suggested wait before retrying, when provided. */
+    public readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = 'SearchProviderError';

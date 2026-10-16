@@ -128,18 +128,43 @@ export async function selectAndFetch(
   return { selected, fetched, failed };
 }
 
-/** Compact evidence packets for the agent: bounded page text when fetched, snippet otherwise. */
+/**
+ * Discovery origin of evidence relative to a run: 'new' if the run created the evidence row (first
+ * discovery), 'inherited' otherwise. A rediscovery by this run keeps origin 'inherited'.
+ */
+export function evidenceOrigins(
+  ctx: WorkflowContext,
+  runId: string,
+): { created: Set<string>; returned: Set<string> } {
+  const discs = ctx.repos.listDiscoveriesByRun(runId);
+  const returned = new Set(discs.map((d) => d.evidenceId));
+  const created = new Set<string>();
+  for (const id of returned) {
+    const e = ctx.repos.getEvidence(id);
+    const firstQuery = e && ctx.repos.getQuery(e.queryId);
+    if (firstQuery && firstQuery.runId === runId) created.add(id);
+  }
+  return { created, returned };
+}
+
+/** Compact evidence packets for the agent: bounded page text when fetched, snippet otherwise, labelled with origin. */
 export function buildPackets(
   ctx: WorkflowContext,
   projectId: string,
   evidence: Evidence[],
+  runId?: string,
 ): EvidencePacket[] {
   const qText = new Map(ctx.repos.listQueries(projectId).map((q) => [q.id, q.query]));
   const max = ctx.config.packetMaxChars;
+  const origins = runId
+    ? evidenceOrigins(ctx, runId)
+    : { created: new Set<string>(), returned: new Set<string>() };
   return evidence.map((e) => {
     const fetched = e.fetchStatus === 'fetched' && e.fullText;
     const text = fetched ? e.fullText!.slice(0, max) : '';
     return {
+      origin: origins.created.has(e.id) ? ('new' as const) : ('inherited' as const),
+      returnedThisRun: origins.returned.has(e.id),
       id: e.id,
       url: e.canonicalUrl || e.url,
       title: e.pageTitle || e.title,

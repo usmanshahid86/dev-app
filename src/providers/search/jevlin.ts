@@ -100,6 +100,7 @@ export class JevlinSearchProvider implements SearchProvider {
         Boolean(env.retryable),
         env.action ?? 'report',
         stdout,
+        typeof env.retry_after_ms === 'number' ? env.retry_after_ms : undefined,
       );
     }
     const items = normalizeJevlin(env);

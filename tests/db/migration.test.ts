@@ -166,6 +166,9 @@ describe('database migrations', () => {
     const run = repos.getRun('run_v0')!;
     expect(run.budget.maxPageFetches).toBe(0);
     expect(run.progress.pageFetchesSelected).toBe(0);
+    // pre-tracking rows read as unknown, never as a fabricated status
+    expect(run.progress.retrieval).toBeNull();
+    expect(repos.listQueries(pid)[0]!.failureCode).toBeNull();
     // 3) re-opening is idempotent (no duplicate discoveries).
     sqlite.close();
     const again = openDb({ path: file });

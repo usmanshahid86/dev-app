@@ -133,6 +133,34 @@ export type SupportLevel = z.infer<typeof SupportLevel>;
 export const SignalKind = z.enum(['raw', 'consolidated']);
 export type SignalKind = z.infer<typeof SignalKind>;
 
+/**
+ * Retrieval EXECUTION status of a run's searches (separate from evidence provenance and from the
+ * overall run/investigation status): complete = every planned query executed successfully (even with
+ * zero results); partial = some executed; none = no query executed successfully.
+ */
+export const RetrievalStatus = z.enum(['complete', 'partial', 'none']);
+export type RetrievalStatus = z.infer<typeof RetrievalStatus>;
+
+/** Per-query outcome classes, counted on the run and per candidate. */
+export const QueryOutcomes = z.object({
+  planned: z.number().int().default(0),
+  succeeded: z.number().int().default(0),
+  /** Executed successfully but returned no results (counts as executed, provides no evidence). */
+  succeededEmpty: z.number().int().default(0),
+  rateLimited: z.number().int().default(0),
+  transportFailed: z.number().int().default(0),
+  otherFailed: z.number().int().default(0),
+  /** Never attempted: the retry/wait budget was exhausted or a fatal provider condition stopped the run. */
+  skipped: z.number().int().default(0),
+  retries: z.number().int().default(0),
+  waitedMs: z.number().int().default(0),
+});
+export type QueryOutcomes = z.infer<typeof QueryOutcomes>;
+
+/** Where a finding's evidence came from relative to the investigation run that produced it. */
+export const RetrievalOrigin = z.enum(['new', 'inherited', 'mixed', 'none', 'unknown']);
+export type RetrievalOrigin = z.infer<typeof RetrievalOrigin>;
+
 // ---------- Discovery profile ----------
 
 export const DiscoveryProfile = z.object({
@@ -222,6 +250,10 @@ export const ResearchRun = z.object({
     pageFetchesCompleted: z.number().int().default(0),
     pageFetchesFailed: z.number().int().default(0),
     agentRetries: z.number().int().default(0),
+    /** null = run predates retrieval tracking. */
+    retrieval: RetrievalStatus.nullable().default(null),
+    queryOutcomes: QueryOutcomes.nullable().default(null),
+    retrievalNote: z.string().nullable().default(null),
     message: z.string().optional(),
   }),
   error: z.string().nullable(),
@@ -238,7 +270,9 @@ export const ResearchQuery = z.object({
   family: QueryFamily,
   purpose: z.string(),
   provider: z.string(),
-  status: z.enum(['planned', 'running', 'completed', 'failed']),
+  status: z.enum(['planned', 'running', 'completed', 'failed', 'skipped']),
+  /** rate_limited | transport | timeout | no_provider_answer | <provider code> | retry_budget_exhausted | <action> required */
+  failureCode: z.string().nullable().default(null),
   executedAt: z.string().nullable(),
   durationMs: z.number().nullable(),
   resultCount: z.number().nullable(),
@@ -409,6 +443,11 @@ export const Investigation = z.object({
   status: RunStatus,
   comparison: z.array(ComparisonRow).nullable(),
   comparisonSummary: z.string().nullable(),
+  /** Copied from the run at completion so results carry their retrieval status. null = pre-tracking. */
+  retrieval: RetrievalStatus.nullable().default(null),
+  retrievalNote: z.string().nullable().default(null),
+  /** Per-opportunity query outcomes (comparative runs). */
+  candidateRetrieval: z.record(z.string(), QueryOutcomes).nullable().default(null),
   createdAt: z.string(),
 });
 export type Investigation = z.infer<typeof Investigation>;
@@ -434,6 +473,8 @@ export const Finding = z.object({
   /** Computed from evidence fetch state + excerpt verification; never set by the agent. */
   supportLevel: SupportLevel.default('snippet_only'),
   excerpts: z.array(SupportingExcerpt).default([]),
+  /** Discovery origin of the cited evidence relative to this investigation's run (independent of supportLevel). */
+  retrievalOrigin: RetrievalOrigin.default('unknown'),
   createdAt: z.string(),
 });
 export type Finding = z.infer<typeof Finding>;
@@ -596,6 +637,8 @@ export const EventType = z.enum([
   'evidence_excerpt_verified',
   'evidence_excerpt_rejected',
   'agent_retry',
+  'search_retry',
+  'retrieval_summarized',
   'signal_created',
   'cluster_created',
   'opportunity_created',

@@ -5,7 +5,7 @@
 import type { WorkflowContext } from './context';
 import { WorkflowError } from './context';
 import { executeQueries } from './search';
-import { selectAndFetch, buildPackets } from './fetch';
+import { selectAndFetch, buildPackets, evidenceOrigins } from './fetch';
 import { createRun, setStage, bumpProgress, finishRun, launch, runAgent } from './runs';
 import { planValidation, reviewValidation } from '@providers/agent/ops';
 import { toAgentOpportunity } from './investigation';
@@ -91,6 +91,11 @@ export function startValidation(
       );
       if (search.fatal)
         throw new Error(`Search provider needs attention (${search.fatal.action}): ${search.fatal.message}`);
+      bumpProgress(ctx, run.id, {
+        retrieval: search.retrieval,
+        queryOutcomes: search.outcomes,
+        retrievalNote: search.retrievalNote,
+      });
       setStage(ctx, run, 'fetching_pages');
       await selectAndFetch(ctx, run, toAgentOpportunity(opp), search.evidence, 'validation');
       setStage(ctx, run, 'reviewing');
@@ -114,14 +119,23 @@ export function startValidation(
           category: e.category,
           domain: e.domain,
         })),
-        newEvidence: buildPackets(ctx, projectId, newEvidence),
+        newEvidence: buildPackets(ctx, projectId, newEvidence, run.id),
         whatWeBuilt: review.whatWeBuilt,
         implementationLessons: review.implementationLessons,
       });
       const assumptionIds = new Set(assumptions.map((a) => a.id));
       const allowed = new Map(newEvidence.map((e) => [e.id, e]));
       const validated = validateFindings(res.findings, allowed);
+      const origins = evidenceOrigins(ctx, run.id);
       const findings = validated.map((v) => ({
+        retrievalOrigin:
+          v.evidenceIds.length === 0
+            ? ('none' as const)
+            : v.evidenceIds.every((id) => origins.created.has(id))
+              ? ('new' as const)
+              : v.evidenceIds.some((id) => origins.created.has(id))
+                ? ('mixed' as const)
+                : ('inherited' as const),
         id: newId('finding'),
         projectId,
         investigationId: review.id,
@@ -155,7 +169,7 @@ export function startValidation(
         ctx,
         run.id,
         search.failed ? 'partial' : 'completed',
-        search.failed ? `${search.failed} searches failed` : undefined,
+        search.failed ? search.retrievalNote : undefined,
       );
       repos.updateProject(projectId, { stage: 'BUILD_PACKAGE_READY' });
       telemetry.emit('validation_completed', projectId, {

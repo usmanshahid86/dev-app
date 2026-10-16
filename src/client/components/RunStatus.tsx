@@ -73,6 +73,7 @@ export function RunStatus({ run }: { run: ResearchRun }) {
           ? ` · pages ${p.pageFetchesCompleted} read / ${p.pageFetchesSelected} selected${p.pageFetchesFailed ? ` / ${p.pageFetchesFailed} failed` : ''}`
           : ''}
         {p.agentRetries ? ` · ${p.agentRetries} agent retr${p.agentRetries === 1 ? 'y' : 'ies'}` : ''}
+        {p.retrieval ? ` · retrieval ${p.retrieval}${p.retrievalNote ? ` (${p.retrievalNote})` : ''}` : ''}
       </div>
       {run.error && (
         <div

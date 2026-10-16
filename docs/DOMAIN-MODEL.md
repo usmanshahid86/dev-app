@@ -40,6 +40,7 @@ Source evidence → Observed signal → Opportunity hypothesis → Product resea
 - A `sourced_fact` finding whose evidence ids do not exist is demoted to `inference`; an inference never becomes a fact by citing evidence.
 - Excerpts are verified only against the text of the evidence record they cite; `supportLevel` is computed, never agent-set.
 - Page fetches never exceed `budget.maxPageFetches`; discovery runs have a budget of 0.
+- An investigation is `completed` only if `retrieval === 'complete'`; a run's query statuses are planned / running / completed / failed / skipped with a `failure_code` on failures and skips.
 - A build package cannot be generated from an agent recommendation alone; `userDecision` must be BUILD or PIVOT.
 - Backward navigation changes `stage` only; no artifact is deleted (`tests/workflows/e2e.test.ts`).
 - `danglingReferences()` in `domain/lineage.ts` checks evidence→signal→opportunity integrity and is asserted in tests.

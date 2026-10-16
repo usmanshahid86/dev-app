@@ -5,7 +5,15 @@
  * as 'partial'. Demo (fixture) results are never produced here as a fallback for a failed real search.
  */
 import type { WorkflowContext } from './context';
-import type { Evidence, EvidenceDiscovery, QueryFamily, ResearchQuery, ResearchRun } from '@domain/types';
+import type {
+  Evidence,
+  EvidenceDiscovery,
+  QueryFamily,
+  QueryOutcomes,
+  ResearchQuery,
+  ResearchRun,
+  RetrievalStatus,
+} from '@domain/types';
 import { newId, nowIso } from '@domain/ids';
 import { canonicalizeUrl } from '@domain/canonicalUrl';
 import { classifySource } from '@domain/sourceCategory';
@@ -18,6 +26,11 @@ export interface PlannedQueryInput {
 }
 
 export interface SearchExecutionResult {
+  /** Execution status of the planned searches (independent of how much evidence they produced). */
+  retrieval: RetrievalStatus;
+  outcomes: QueryOutcomes;
+  /** Human-readable one-liner, e.g. "0 of 6 searches executed: 6 rate-limited". */
+  retrievalNote: string;
   queries: ResearchQuery[];
   /** Every evidence row touched by this run (newly created + rediscovered), deduplicated. */
   evidence: Evidence[];
@@ -36,8 +49,14 @@ export async function executeQueries(
   opts: {
     maxResultsPerQuery: number;
     onProgress?: (p: { completed: number; failed: number; evidence: number }) => void;
+    /** Test hook: replaces the real wait between retries. */
+    sleep?: (ms: number) => Promise<void>;
   },
 ): Promise<SearchExecutionResult> {
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const retryBudgetMs = ctx.config.searchRetryBudgetMs;
+  const maxRetries = ctx.config.searchMaxRetriesPerQuery;
+  const defaultWaitMs = ctx.config.searchDefaultRetryWaitMs;
   const { repos, telemetry, providers } = ctx;
   const budgeted = planned.slice(0, run.budget.maxQueries);
   const queries: ResearchQuery[] = budgeted.map((p) =>
@@ -55,6 +74,7 @@ export async function executeQueries(
       resultCount: null,
       rawResponseId: null,
       error: null,
+      failureCode: null,
     }),
   );
   for (const q of queries)
@@ -71,11 +91,65 @@ export async function executeQueries(
   let completed = 0;
   let failed = 0;
   let lastFatal: SearchProviderError | null = null;
+  const outcomes: QueryOutcomes = {
+    planned: queries.length,
+    succeeded: 0,
+    succeededEmpty: 0,
+    rateLimited: 0,
+    transportFailed: 0,
+    otherFailed: 0,
+    skipped: 0,
+    retries: 0,
+    waitedMs: 0,
+  };
+  let waitedMs = 0;
+  const skipRest = (from: number, code: string, why: string) => {
+    for (const rest of queries.slice(from)) {
+      repos.updateQuery(rest.id, { status: 'skipped', failureCode: code, error: `skipped: ${why}` });
+      outcomes.skipped++;
+      failed++;
+    }
+  };
 
-  for (const q of queries) {
+  /**
+   * Bounded retry/wait policy for retryable failures: honour retry_after_ms (or a default wait)
+   * while the run's wait budget lasts; at most `maxRetries` retries per query. Returns the result
+   * or throws the final error. Sets `budgetExhausted` when a retry was wanted but not affordable.
+   */
+  const searchWithRetry = async (q: ResearchQuery) => {
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await providers.search.search(q.query, { maxResults: opts.maxResultsPerQuery });
+      } catch (err) {
+        const retryable = err instanceof SearchProviderError && err.retryable;
+        if (!retryable || attempt >= maxRetries) throw err;
+        const wantMs = (err as SearchProviderError).retryAfterMs ?? defaultWaitMs;
+        if (waitedMs + wantMs > retryBudgetMs) {
+          (err as SearchProviderError & { budgetExhausted?: boolean }).budgetExhausted = true;
+          throw err;
+        }
+        attempt++;
+        outcomes.retries++;
+        waitedMs += wantMs;
+        outcomes.waitedMs = waitedMs;
+        telemetry.emit('search_retry', run.projectId, {
+          runId: run.id,
+          queryId: q.id,
+          attempt,
+          waitMs: wantMs,
+          code: (err as SearchProviderError).code,
+        });
+        await sleep(wantMs);
+      }
+    }
+  };
+
+  for (const [qi, q] of queries.entries()) {
+    if (q.status === 'skipped') continue;
     repos.updateQuery(q.id, { status: 'running' });
     try {
-      const res = await providers.search.search(q.query, { maxResults: opts.maxResultsPerQuery });
+      const res = await searchWithRetry(q);
       const rawId = newId('raw');
       repos.createRawResponse({ id: rawId, queryId: q.id, provider: res.provider, body: res.rawText });
       const retrievedAt = nowIso();
@@ -186,6 +260,8 @@ export async function executeQueries(
         rawResponseId: rawId,
       });
       completed++;
+      outcomes.succeeded++;
+      if (res.items.length === 0) outcomes.succeededEmpty++;
       telemetry.emit('search_completed', run.projectId, {
         runId: run.id,
         queryId: q.id,
@@ -203,30 +279,46 @@ export async function executeQueries(
     } catch (err) {
       failed++;
       const message = err instanceof Error ? err.message : String(err);
-      repos.updateQuery(q.id, { status: 'failed', executedAt: nowIso(), error: message });
+      const code = classifyFailure(err);
+      if (code === 'rate_limited') outcomes.rateLimited++;
+      else if (code === 'transport') outcomes.transportFailed++;
+      else outcomes.otherFailed++;
+      repos.updateQuery(q.id, { status: 'failed', executedAt: nowIso(), error: message, failureCode: code });
       telemetry.emit('search_failed', run.projectId, {
         runId: run.id,
         queryId: q.id,
         provider: providers.search.name,
         code: err instanceof SearchProviderError ? err.code : 'unknown',
+        failureClass: code,
         action: err instanceof SearchProviderError ? err.action : 'report',
+        retryAfterMs: err instanceof SearchProviderError ? (err.retryAfterMs ?? null) : null,
       });
       if (
         err instanceof SearchProviderError &&
         !err.retryable &&
         ['login', 'connect', 'check_access'].includes(err.action)
       ) {
+        // Credentials/registration problems will not fix themselves mid-run: stop spending queries.
         lastFatal = err;
-        for (const rest of queries.slice(queries.indexOf(q) + 1)) {
-          repos.updateQuery(rest.id, { status: 'failed', error: `skipped: ${err.action} required` });
-          failed++;
-        }
+        skipRest(qi + 1, `${err.action}_required`, `${err.action} required`);
+        break;
+      }
+      if ((err as { budgetExhausted?: boolean }).budgetExhausted) {
+        // Retry/wait budget is gone and the provider is still refusing: do not burn the rest of the plan.
+        skipRest(qi + 1, 'retry_budget_exhausted', `retry/wait budget of ${retryBudgetMs} ms exhausted`);
         break;
       }
     }
     opts.onProgress?.({ completed, failed, evidence: touched.size });
   }
+  const retrieval: RetrievalStatus =
+    outcomes.succeeded === 0 ? 'none' : outcomes.succeeded < outcomes.planned ? 'partial' : 'complete';
+  const retrievalNote = describeOutcomes(outcomes);
+  telemetry.emit('retrieval_summarized', run.projectId, { runId: run.id, retrieval, ...outcomes });
   return {
+    retrieval,
+    outcomes,
+    retrievalNote,
     queries: repos.listQueries(run.projectId, run.id),
     evidence: [...touched.values()],
     newEvidence: created,
@@ -239,4 +331,29 @@ export async function executeQueries(
         }
       : undefined,
   };
+}
+
+/** Failure class for run metadata: rate_limited | transport | other. */
+export function classifyFailure(err: unknown): 'rate_limited' | 'transport' | 'other' {
+  if (!(err instanceof SearchProviderError)) return 'other';
+  if (err.code === 'rate_limited') return 'rate_limited';
+  if (['timeout', 'spawn', 'no_envelope', 'no_provider_answer', 'network', 'transport'].includes(err.code))
+    return 'transport';
+  return 'other';
+}
+
+/** One line a human can read above a comparison table or brief. */
+export function describeOutcomes(o: QueryOutcomes): string {
+  const parts: string[] = [];
+  if (o.succeededEmpty) parts.push(`${o.succeededEmpty} returned no results`);
+  if (o.rateLimited) parts.push(`${o.rateLimited} rate-limited`);
+  if (o.transportFailed)
+    parts.push(`${o.transportFailed} transport failure${o.transportFailed === 1 ? '' : 's'}`);
+  if (o.otherFailed) parts.push(`${o.otherFailed} failed`);
+  if (o.skipped) parts.push(`${o.skipped} not attempted`);
+  if (o.retries)
+    parts.push(
+      `${o.retries} retr${o.retries === 1 ? 'y' : 'ies'} after waiting ${Math.round(o.waitedMs / 1000)} s`,
+    );
+  return `${o.succeeded} of ${o.planned} searches executed${parts.length ? ': ' + parts.join(', ') : ''}`;
 }

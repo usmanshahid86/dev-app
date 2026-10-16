@@ -11,6 +11,7 @@ import { useProjectCtx } from '../lib/useProject';
 import { api, type Snapshot } from '../lib/api';
 import { opportunitiesForEvidence, rawSignalsForConsolidated, consolidatedForRaw } from '@domain/lineage';
 import { DemoTag, SupportBadge, FetchBadge, CategoryBadge, CorroborationLine } from './Badges';
+import { OriginTag } from './RetrievalStrip';
 import type { Evidence, Finding } from '@domain/types';
 
 type Target =
@@ -440,6 +441,7 @@ function FindingView({ snap, id, projectId }: { snap: Snapshot; id: string; proj
         <Node label="Support">
           <div className="row">
             <SupportBadge level={f.supportLevel} />
+            <OriginTag origin={f.retrievalOrigin} />
             <span className="badge badge-neutral">agent-rated {f.supportStrength}</span>
           </div>
           <div className="small muted" style={{ marginTop: 4 }}>

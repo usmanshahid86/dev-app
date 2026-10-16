@@ -11,6 +11,18 @@ const demoBanner = (snap: ProjectSnapshot) =>
     ? '> **DEMO CONTENT** — generated from fixture providers. Sources are fake pages under demo.invalid and are not real web evidence.\n\n'
     : '';
 
+/** Retrieval status of the investigation that produced an artifact; never silent. */
+function retrievalBanner(
+  inv: { retrieval: string | null; retrievalNote: string | null } | undefined,
+): string {
+  if (!inv || inv.retrieval === null)
+    return '> **Retrieval status unknown** — this artifact predates retrieval tracking; treat it as resting on earlier research only.\n\n';
+  if (inv.retrieval === 'complete') return `> Fresh retrieval complete — ${inv.retrievalNote}.\n\n`;
+  if (inv.retrieval === 'partial')
+    return `> **Fresh retrieval incomplete** — ${inv.retrievalNote}. Conclusions depending on the missing searches are provisional.\n\n`;
+  return `> **No fresh search succeeded** — ${inv.retrievalNote}. This artifact was built from earlier research (inherited evidence) only; its conclusions are provisional.\n\n`;
+}
+
 function evidenceLine(e: Evidence): string {
   const fetch =
     e.fetchStatus === 'fetched'
@@ -24,7 +36,7 @@ function evidenceLine(e: Evidence): string {
 function findingLine(f: Finding, byId: Map<string, Evidence>): string {
   const refs = f.evidenceIds.map((id) => byId.get(id)).filter((x): x is Evidence => Boolean(x));
   const kind = f.kind === 'sourced_fact' ? 'sourced' : 'inference';
-  const support = SUPPORT_LEVEL_LABEL[f.supportLevel];
+  const support = `${SUPPORT_LEVEL_LABEL[f.supportLevel]}; evidence origin: ${f.retrievalOrigin}`;
   const ex = f.excerpts
     .map(
       (x) =>
@@ -57,9 +69,11 @@ export function renderProjectBrief(snap: ProjectSnapshot): string {
     return `# Project Brief — ${snap.project.title}\n\n${demoBanner(snap)}_No Product Brief has been generated yet._\n`;
   const findings = snap.findings.filter((f) => f.investigationId === brief.investigationId);
   const cited = new Set(findings.flatMap((f) => f.evidenceIds));
+  const inv = snap.investigations.find((i) => i.id === brief.investigationId);
   const out: string[] = [];
   out.push(`# Product Brief — ${opp.title}\n`);
   out.push(demoBanner(snap));
+  out.push(retrievalBanner(inv));
   out.push(`_Project: ${snap.project.title} · Brief v${brief.version} · Generated ${brief.createdAt}_\n`);
   out.push(`**Thesis:** ${opp.thesis}\n`);
   for (const [i, s] of brief.sections.entries()) {

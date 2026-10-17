@@ -56,3 +56,32 @@ Status: **pre-registered** (this section was committed before any DOGFOOD-04 sea
 ### A6. Validation checkpoints for V0.1.2
 
 Retrieval visibility (counts on the Research page and brief agree with persisted run and evidence rows); fetch-failure suppression (exercised only if a natural failure recurs within the project, otherwise reported as not exercised); agent-cost accounting (one `agent_call` per completed call, retries individually, no double counting, three categories kept apart, reconciled to event metadata); provenance (new, inherited and mixed origins independent of support level; every excerpt locatable in retained text).
+
+## Discovery result and candidate selection (recorded before comparison started)
+
+| Item                               | Value                                                                                                                                                       |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project                            | `prj_9b78f82754c042b0` (real mode, created through the application API)                                                                                     |
+| Discovery run                      | `run_356d750a51bf405a`, 2026-10-17 03:05:34 → 03:08:35 UTC (3 min 1 s), status `completed`                                                                  |
+| Searches                           | 12 planned, 12 executed, 0 failed, 0 retried, 0 skipped; 120 results (10 per query), 118 canonical sources on 79 domains, 2 sources returned by two queries |
+| Search cost                        | 36,000 µ$ ($0.036)                                                                                                                                          |
+| Agent calls                        | 9 `agent_call` events, all CLI-reported, $0.520 API-equivalent (not billed expenditure)                                                                     |
+| Pipeline                           | 25 raw signals → 13 consolidated → 5 clusters → 4 opportunity cards                                                                                         |
+| Independence from earlier projects | 0 canonical URLs shared with any earlier project; 17 of 79 domains also seen before                                                                         |
+
+Cards exactly as produced:
+
+| Card                   | Title                                                                          | Seeded | Evidence | Competition | Monetization | Consolidated signals |
+| ---------------------- | ------------------------------------------------------------------------------ | ------ | -------- | ----------- | ------------ | -------------------- |
+| `opp_4cb9cb98ba644521` | Cross-platform drift monitoring and self-healing for enterprise UI automations | yes    | medium   | high        | medium       | 7                    |
+| `opp_0c2271067c084c4e` | Production reliability and drift monitoring for computer-use / browser agents  | no     | weak     | medium      | weak         | 4                    |
+| `opp_7dfb910c4d41484b` | Per-bot repair and monitoring tooling sold to RPA managed-service providers    | no     | weak     | unknown     | medium       | 3                    |
+| `opp_075e44c8db764707` | Governed, auditable repair with failure-cause classification                   | no     | weak     | unknown     | weak         | 3                    |
+
+**Rule A5-1 applied.** All four cards have a target user and problem inside the declared market area, so more than three qualify. The seeded card is taken; among the remaining three, all rated `weak` on evidence strength, the tie breaks on consolidated-signal count (4, 3, 3) and then title, giving the cards `opp_0c2271067c084c4e` and `opp_075e44c8db764707` (the managed-service-provider card loses the title tie-break to the governed-repair card).
+
+**Candidate set for comparison:** `opp_4cb9cb98ba644521`, `opp_0c2271067c084c4e`, `opp_075e44c8db764707`.
+
+**Primary opportunity (rule A5-2): `opp_4cb9cb98ba644521`**, the seeded card, which is also the deep-investigation target (rule A5-3).
+
+Observations recorded now, not interpreted: the discovery run's `retrieval` and `queryOutcomes` fields are null (retrieval status is recorded only for investigation runs); the application's own "why now" for the primary card reads "Weak", and its alternatives list already names several vendor-shipped self-healing features, so the application starts out skeptical of its own seed.

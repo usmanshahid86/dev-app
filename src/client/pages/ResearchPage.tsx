@@ -100,6 +100,8 @@ function ComparisonView({ inv }: { inv: Investigation }) {
         inv={inv}
         kind="comparison"
         candidates={opps.map((o) => ({ id: o.id, title: o.title }))}
+        run={snap.runs.find((r) => r.id === inv.runId) ?? null}
+        findings={snap.findings.filter((f) => f.investigationId === inv.id)}
       />
       <table className="tbl compare">
         <thead>
@@ -247,7 +249,14 @@ function BriefView({ brief }: { brief: ProductBrief }) {
             )}
           </div>
         </div>
-        {deepInv && <RetrievalStrip inv={deepInv} kind="brief" />}
+        {deepInv && (
+          <RetrievalStrip
+            inv={deepInv}
+            kind="brief"
+            run={snap.runs.find((r) => r.id === deepInv.runId) ?? null}
+            findings={findings}
+          />
+        )}
         <h1>{opp?.title}</h1>
         <p className="lead">{opp?.thesis}</p>
         {brief.sections.map((s, i) => (

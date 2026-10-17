@@ -157,6 +157,23 @@ export const QueryOutcomes = z.object({
 });
 export type QueryOutcomes = z.infer<typeof QueryOutcomes>;
 
+/**
+ * Run-level agent cost accounting, derived from `agent_call` events (recomputed, never incremented).
+ * Three categories are kept apart on purpose: a CLI-reported figure is what the CLI computed as the
+ * API-equivalent of the work (under a subscription it is NOT billed expenditure); an estimate is tokens
+ * priced by a versioned table; unknown calls carried no usable metadata.
+ */
+export const AgentCost = z.object({
+  calls: z.number().int().default(0),
+  cliReportedUsd: z.number().nullable().default(null),
+  cliReportedCalls: z.number().int().default(0),
+  estimatedUsd: z.number().nullable().default(null),
+  estimatedCalls: z.number().int().default(0),
+  unknownCalls: z.number().int().default(0),
+  pricingVersion: z.string().nullable().default(null),
+});
+export type AgentCost = z.infer<typeof AgentCost>;
+
 /** Where a finding's evidence came from relative to the investigation run that produced it. */
 export const RetrievalOrigin = z.enum(['new', 'inherited', 'mixed', 'none', 'unknown']);
 export type RetrievalOrigin = z.infer<typeof RetrievalOrigin>;
@@ -249,7 +266,11 @@ export const ResearchRun = z.object({
     pageFetchesSelected: z.number().int().default(0),
     pageFetchesCompleted: z.number().int().default(0),
     pageFetchesFailed: z.number().int().default(0),
+    /** Candidates excluded from page selection by the fetch-failure policy (see workflows/fetchPolicy.ts). */
+    pageFetchesSuppressed: z.number().int().default(0),
     agentRetries: z.number().int().default(0),
+    /** null = run predates agent-cost accounting. */
+    agentCost: AgentCost.nullable().default(null),
     /** null = run predates retrieval tracking. */
     retrieval: RetrievalStatus.nullable().default(null),
     queryOutcomes: QueryOutcomes.nullable().default(null),
@@ -640,6 +661,8 @@ export const EventType = z.enum([
   'search_retry',
   'retrieval_summarized',
   'retrieval_backfilled',
+  'agent_call',
+  'page_fetch_suppressed',
   'signal_created',
   'cluster_created',
   'opportunity_created',

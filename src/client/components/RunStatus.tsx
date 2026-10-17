@@ -29,6 +29,23 @@ const VALIDATION_STEPS: Array<{ key: RunStageLabel; label: string }> = [
   { key: 'reviewing', label: 'Reviewing' },
 ];
 
+/** Three cost categories, never summed into one figure. */
+export function describeAgentCost(c: ResearchRun['progress']['agentCost']): string {
+  if (!c) return 'agent cost: unknown (run predates cost accounting)';
+  const parts: string[] = [];
+  if (c.cliReportedUsd !== null)
+    parts.push(
+      `CLI-reported API-equivalent $${c.cliReportedUsd.toFixed(3)} (${c.cliReportedCalls} call${c.cliReportedCalls === 1 ? '' : 's'}; not billed expenditure under a subscription)`,
+    );
+  if (c.estimatedUsd !== null)
+    parts.push(
+      `estimated $${c.estimatedUsd.toFixed(3)} from tokens (${c.estimatedCalls} call${c.estimatedCalls === 1 ? '' : 's'}, price table ${c.pricingVersion})`,
+    );
+  if (c.unknownCalls)
+    parts.push(`${c.unknownCalls} call${c.unknownCalls === 1 ? '' : 's'} with unknown cost`);
+  return `agent cost: ${parts.join(' · ') || `${c.calls} calls, no cost data`}`;
+}
+
 export function RunStatus({ run }: { run: ResearchRun }) {
   const steps =
     run.kind === 'discovery'
@@ -74,6 +91,12 @@ export function RunStatus({ run }: { run: ResearchRun }) {
           : ''}
         {p.agentRetries ? ` · ${p.agentRetries} agent retr${p.agentRetries === 1 ? 'y' : 'ies'}` : ''}
         {p.retrieval ? ` · retrieval ${p.retrieval}${p.retrievalNote ? ` (${p.retrievalNote})` : ''}` : ''}
+        {p.pageFetchesSuppressed
+          ? ` · ${p.pageFetchesSuppressed} fetch candidate${p.pageFetchesSuppressed === 1 ? '' : 's'} excluded by fetch policy`
+          : ''}
+      </div>
+      <div className="small muted" data-testid="agent-cost">
+        {describeAgentCost(p.agentCost)}
       </div>
       {run.error && (
         <div

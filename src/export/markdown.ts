@@ -3,7 +3,15 @@
  * source of truth: PROJECT-BRIEF.md, PRODUCT-DECISION.md, BUILD-PACKAGE.md, AGENT-HANDOFF.md.
  */
 import type { ProjectSnapshot } from '@workflows/projects';
-import type { Evidence, Finding, ProductBrief, Decision, BuildPackage, Opportunity } from '@domain/types';
+import type {
+  Evidence,
+  Finding,
+  ProductBrief,
+  Decision,
+  BuildPackage,
+  Opportunity,
+  ResearchRun,
+} from '@domain/types';
 import { SUPPORT_LEVEL_LABEL } from '@domain/findings';
 
 const demoBanner = (snap: ProjectSnapshot) =>
@@ -11,16 +19,36 @@ const demoBanner = (snap: ProjectSnapshot) =>
     ? '> **DEMO CONTENT** — generated from fixture providers. Sources are fake pages under demo.invalid and are not real web evidence.\n\n'
     : '';
 
-/** Retrieval status of the investigation that produced an artifact; never silent. */
-function retrievalBanner(
+/** Retrieval status of the investigation that produced an artifact; never silent. Three separate lines: searches, pages, findings. */
+export function retrievalBanner(
   inv: { retrieval: string | null; retrievalNote: string | null } | undefined,
+  run?: ResearchRun,
+  findings: Finding[] = [],
 ): string {
+  const pages = (() => {
+    if (!run) return 'pages: unknown (run record not available)';
+    const p = run.progress;
+    if (!(p.retrieval !== null || p.pageFetchesSelected > 0))
+      return 'pages: unknown (run predates fetch tracking)';
+    if (run.budget.maxPageFetches === 0) return 'pages: none (this run does not fetch pages)';
+    if (p.pageFetchesSelected === 0) return 'pages: none selected';
+    return `pages: ${p.pageFetchesCompleted} of ${p.pageFetchesSelected} selected pages read${p.pageFetchesFailed ? `, ${p.pageFetchesFailed} failed` : ''}${p.pageFetchesSuppressed ? `, ${p.pageFetchesSuppressed} excluded by fetch policy` : ''}`;
+  })();
+  const order = ['full_page_excerpt_verified', 'full_page', 'snippet_only', 'inference'] as const;
+  const fl = findings.length
+    ? `findings: ${order
+        .map((k) => [k, findings.filter((f) => f.supportLevel === k).length] as const)
+        .filter(([, n]) => n > 0)
+        .map(([k, n]) => `${n} ${SUPPORT_LEVEL_LABEL[k].toLowerCase()}`)
+        .join(' · ')}`
+    : 'findings: none';
+  const detail = `>\n> searches: ${inv?.retrievalNote ?? 'unknown'} · ${pages} · ${fl}\n\n`;
   if (!inv || inv.retrieval === null)
-    return '> **Retrieval status unknown** — this artifact predates retrieval tracking; treat it as resting on earlier research only.\n\n';
-  if (inv.retrieval === 'complete') return `> Fresh retrieval complete — ${inv.retrievalNote}.\n\n`;
+    return `> **Retrieval status unknown** — this artifact predates retrieval tracking; treat it as resting on earlier research only.\n${detail}`;
+  if (inv.retrieval === 'complete') return `> Fresh retrieval complete — ${inv.retrievalNote}.\n${detail}`;
   if (inv.retrieval === 'partial')
-    return `> **Fresh retrieval incomplete** — ${inv.retrievalNote}. Conclusions depending on the missing searches are provisional.\n\n`;
-  return `> **No fresh search succeeded** — ${inv.retrievalNote}. This artifact was built from earlier research (inherited evidence) only; its conclusions are provisional.\n\n`;
+    return `> **Fresh retrieval incomplete** — ${inv.retrievalNote}. Conclusions depending on the missing searches are provisional.\n${detail}`;
+  return `> **No fresh search succeeded** — ${inv.retrievalNote}. This artifact was built from earlier research (inherited evidence) only; its conclusions are provisional.\n${detail}`;
 }
 
 function evidenceLine(e: Evidence): string {
@@ -70,10 +98,11 @@ export function renderProjectBrief(snap: ProjectSnapshot): string {
   const findings = snap.findings.filter((f) => f.investigationId === brief.investigationId);
   const cited = new Set(findings.flatMap((f) => f.evidenceIds));
   const inv = snap.investigations.find((i) => i.id === brief.investigationId);
+  const run = inv?.runId ? snap.runs.find((r) => r.id === inv.runId) : undefined;
   const out: string[] = [];
   out.push(`# Product Brief — ${opp.title}\n`);
   out.push(demoBanner(snap));
-  out.push(retrievalBanner(inv));
+  out.push(retrievalBanner(inv, run, findings));
   out.push(`_Project: ${snap.project.title} · Brief v${brief.version} · Generated ${brief.createdAt}_\n`);
   out.push(`**Thesis:** ${opp.thesis}\n`);
   for (const [i, s] of brief.sections.entries()) {

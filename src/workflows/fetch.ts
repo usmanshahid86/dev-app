@@ -9,6 +9,7 @@ import { selectSourcesForFetch, type EvidencePacket, type OpportunityForAgent } 
 import { PageFetchError } from '@providers/fetch/PageFetcher';
 import type { Evidence, ResearchRun } from '@domain/types';
 import { nowIso } from '@domain/ids';
+import { fetchSuppression } from './fetchPolicy';
 
 export interface FetchOutcome {
   selected: Evidence[];
@@ -27,9 +28,33 @@ export async function selectAndFetch(
   const budget = run.budget.maxPageFetches;
   const current = repos.getRun(run.id)!;
   const remaining = Math.max(0, budget - current.progress.pageFetchesSelected);
-  const unfetched = candidates.filter(
-    (e) => e.fetchStatus === 'snippet_only' || e.fetchStatus === 'fetch_failed',
-  );
+  // Fetch-failure policy (workflows/fetchPolicy.ts): exact-URL suppression, audited per exclusion.
+  const now = new Date();
+  const unfetched: Evidence[] = [];
+  let suppressedCount = 0;
+  for (const e of candidates) {
+    if (e.fetchStatus === 'fetched') continue;
+    const sup = fetchSuppression(e, now, ctx.config);
+    if (!sup.suppressed) {
+      unfetched.push(e);
+      continue;
+    }
+    suppressedCount++;
+    telemetry.emit('page_fetch_suppressed', run.projectId, {
+      runId: run.id,
+      evidenceId: e.id,
+      url: e.url,
+      fetchStatus: e.fetchStatus,
+      fetchError: e.fetchError,
+      reason: sup.reason,
+      permanent: sup.permanent,
+      until: sup.until,
+    });
+  }
+  if (suppressedCount)
+    bumpProgress(ctx, run.id, {
+      pageFetchesSuppressed: current.progress.pageFetchesSuppressed + suppressedCount,
+    });
   if (remaining === 0 || unfetched.length === 0) return { selected: [], fetched: [], failed: [] };
 
   const selection = await runAgent(ctx, run, selectSourcesForFetch, {

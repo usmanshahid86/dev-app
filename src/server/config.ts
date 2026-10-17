@@ -24,6 +24,10 @@ export interface AppConfig {
   searchMaxRetriesPerQuery: number;
   /** Wait used when a retryable failure carries no retry_after_ms. */
   searchDefaultRetryWaitMs: number;
+  /** Cooldown before a URL that answered 401/403 may be selected for fetching again. */
+  fetchSuppressForbiddenMs: number;
+  /** Cooldown before a URL whose page had no readable text may be selected again. */
+  fetchSuppressEmptyMs: number;
   jevlin: { bin: string; configPath: string; tier: string; maxResultsLimit: number };
   claudeCli: { bin: string; model: string };
   anthropic: { model: string };
@@ -82,6 +86,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     searchRetryBudgetMs: nonneg(env.DEVAPP_SEARCH_RETRY_BUDGET_MS, 90_000),
     searchMaxRetriesPerQuery: nonneg(env.DEVAPP_SEARCH_MAX_RETRIES_PER_QUERY, 1),
     searchDefaultRetryWaitMs: nonneg(env.DEVAPP_SEARCH_DEFAULT_RETRY_WAIT_MS, 5_000),
+    fetchSuppressForbiddenMs: nonneg(env.DEVAPP_FETCH_SUPPRESS_FORBIDDEN_MS, 7 * 24 * 3_600_000),
+    fetchSuppressEmptyMs: nonneg(env.DEVAPP_FETCH_SUPPRESS_EMPTY_MS, 24 * 3_600_000),
     jevlin: {
       bin: env.JEVLIN_BIN ?? `${env.HOME ?? ''}/.local/bin/jevlin`,
       configPath: env.JEVLIN_CONFIG ?? `${env.HOME ?? ''}/.jevlin/jevlin.toml`,

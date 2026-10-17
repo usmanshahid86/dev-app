@@ -28,6 +28,8 @@ export const testConfig: AppConfig = {
   searchRetryBudgetMs: 90_000,
   searchMaxRetriesPerQuery: 1,
   searchDefaultRetryWaitMs: 5_000,
+  fetchSuppressForbiddenMs: 7 * 24 * 3_600_000,
+  fetchSuppressEmptyMs: 24 * 3_600_000,
   jevlin: { bin: 'jevlin', configPath: '', tier: 'fast', maxResultsLimit: 20 },
   claudeCli: { bin: 'claude', model: 'sonnet' },
   anthropic: { model: 'claude-sonnet-5-5' },

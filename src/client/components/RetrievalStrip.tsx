@@ -2,7 +2,35 @@
  * Retrieval status strip shown above a comparison table or a brief: did this investigation's own
  * searches execute? Separate from evidence provenance (finding origin) and verification (support level).
  */
-import type { Investigation, QueryOutcomes } from '@domain/types';
+import type { Finding, Investigation, QueryOutcomes, ResearchRun } from '@domain/types';
+import { SUPPORT_LEVEL_LABEL } from '@domain/findings';
+
+/**
+ * Page-fetch line from persisted run counters. A run predating fetch instrumentation (no retrieval
+ * tracking and nothing ever selected) reads as unknown rather than zero.
+ */
+export function describePages(run: ResearchRun | null | undefined): string {
+  if (!run) return 'pages: unknown (run record not available)';
+  const p = run.progress;
+  const instrumented = p.retrieval !== null || p.pageFetchesSelected > 0;
+  if (!instrumented) return 'pages: unknown (run predates fetch tracking)';
+  if (run.budget.maxPageFetches === 0) return 'pages: none (this run does not fetch pages)';
+  if (p.pageFetchesSelected === 0) return 'pages: none selected';
+  const bits = [`${p.pageFetchesCompleted} of ${p.pageFetchesSelected} selected pages read`];
+  if (p.pageFetchesFailed) bits.push(`${p.pageFetchesFailed} failed`);
+  if (p.pageFetchesSuppressed) bits.push(`${p.pageFetchesSuppressed} excluded by fetch policy`);
+  return `pages: ${bits.join(', ')}`;
+}
+
+export function describeFindings(findings: Finding[] | undefined): string {
+  if (!findings) return 'findings: unknown';
+  if (findings.length === 0) return 'findings: none';
+  const order = ['full_page_excerpt_verified', 'full_page', 'snippet_only', 'inference'] as const;
+  const counts = order
+    .map((k) => [k, findings.filter((f) => f.supportLevel === k).length] as const)
+    .filter(([, n]) => n > 0);
+  return `findings: ${counts.map(([k, n]) => `${n} ${SUPPORT_LEVEL_LABEL[k].toLowerCase()}`).join(' · ')}`;
+}
 
 export function describeCandidate(o: QueryOutcomes | undefined): string {
   if (!o) return 'no searches planned';
@@ -19,16 +47,30 @@ export function RetrievalStrip({
   inv,
   candidates,
   kind,
+  run,
+  findings,
 }: {
   inv: Investigation;
   candidates?: Array<{ id: string; title: string }>;
   kind: 'comparison' | 'brief';
+  /** The investigation's run (for page-fetch counters); omit → "unknown". */
+  run?: ResearchRun | null;
+  /** This investigation's findings (for the support distribution); omit → "unknown". */
+  findings?: Finding[];
 }) {
+  const detail = (
+    <div className="small" style={{ marginTop: 4 }} data-testid="retrieval-detail">
+      <div>searches: {inv.retrievalNote ?? 'unknown'}</div>
+      <div>{describePages(run)}</div>
+      <div>{describeFindings(findings)}</div>
+    </div>
+  );
   if (inv.retrieval === null || inv.retrieval === undefined) {
     return (
       <div className="notice notice-info" style={{ marginBottom: 10 }} data-testid="retrieval-strip">
         Retrieval status unknown: this {kind} predates retrieval tracking. Treat its conclusions as resting on
         earlier research only.
+        {detail}
       </div>
     );
   }
@@ -46,6 +88,7 @@ export function RetrievalStrip({
       <div>
         <strong>{headline}</strong>
       </div>
+      {detail}
       {candidates && inv.candidateRetrieval && (
         <div className="small" style={{ marginTop: 4 }}>
           {candidates.map((c) => (

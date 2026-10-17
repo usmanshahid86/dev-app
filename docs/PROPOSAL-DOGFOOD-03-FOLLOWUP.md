@@ -1,6 +1,6 @@
 # Proposal: DOGFOOD-03 follow-up — fetch visibility, repeated fetch failures, agent-cost observability
 
-Status: **proposal for review — nothing implemented.** DOGFOOD-03 artifacts, prompts, budgets, providers and scoring are untouched; candidate B stays at the agent's INVESTIGATE_FURTHER recommendation with no human decision recorded.
+Status: **approved with refinements and implemented** (V0.1.2). Refinements applied: exact-URL suppression only (404/410 permanent; 401/403 and empty text on documented cooldowns; timeout/5xx eligible), no domain statistics and no prompt changes, suppressions audited; cost accounting in three separate categories with CLI figures labelled API-equivalent, stable call ids, idempotent recompute; historical records read "unknown" rather than zero. DOGFOOD-03 artifacts, prompts, budgets, providers and scoring are untouched; candidate B stays at the agent's INVESTIGATE_FURTHER recommendation with no human decision recorded.
 
 ## 1. Page-retrieval visibility
 
